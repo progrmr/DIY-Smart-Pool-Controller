@@ -1,0 +1,199 @@
+substitutions:
+  devicename: esphome-pool-controller
+  friendly_devicename: "ESPHome Pool Controller"
+  deviceip: 192.168.0.229
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_devicename}
+  includes:
+    - pool_pump_rs485.h
+  on_boot:
+    priority: -10
+    then:
+      - lambda: |-
+          uint32_t notConnectedCounter = 0;
+          while (!WiFi.isConnected()) {
+            delay(100);   // delay 100 ms
+            notConnectedCounter++;
+            if(notConnectedCounter > 600) { // Reset board if not connected after 60s
+              ESP.restart();
+            }
+          }
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "MlixHoYywbRk7gFoWjevidw9EjKcaUDVhOz1a1xSjv0="
+
+ota:
+
+
+wifi:
+  networks:
+  - ssid: !secret patio_wifi_ssid
+    password: !secret patio_wifi_password
+  - ssid: !secret wifi_ssid
+    password: !secret wifi_password
+
+  # Optional manual IP
+  manual_ip:
+    static_ip: ${deviceip}
+    gateway: 192.168.0.1
+    subnet: 255.255.255.0
+
+#
+# UART is used for RS-485 serial comm with the Pentair Pool Pump
+#
+uart:
+  id: pump_uart_bus
+  tx_pin: GPIO14
+  rx_pin: GPIO27
+  baud_rate: 9600
+custom_component:
+  - lambda: |-
+      auto myPoolPump = new PoolPumpRS485(id(pump_uart_bus));
+      return {myPoolPump};
+
+# The two relays are used to send 24 VAC power to the valve actuator:
+# 1. valve_direction_relay:
+#    * when ON turns the valve to send water through the solar panels,
+#    * when OFF valve turns back to normal bypass solar position
+# 2. valve_power_relay:
+#    * when ON provide 24 VAC power to the valve actuator, valve will
+#      not change direction or move at all unless this is on.
+# NOTE: valve actuation takes about 26 seconds to complete, 
+#       actuator current drops to 0 when it finishes moving
+switch:
+  - platform: gpio
+    name: "Valve Direction Relay"
+    pin: GPIO22
+    id: valve_direction_relay
+    inverted: True
+    on_turn_on:
+      then:
+        - delay: 35s
+        - switch.turn_off: valve_direction_relay
+
+  - platform: gpio
+    name: "Valve Power Relay"
+    pin: GPIO23
+    id: valve_power_relay
+    inverted: True
+    on_turn_on:
+      then:
+        - repeat:
+            count: 10
+            then:
+              - delay: 1s
+              - component.update: valve_actuator_amps
+              - delay: 2s
+        - switch.turn_off: valve_power_relay
+        - switch.turn_off: valve_direction_relay
+
+sensor:
+# https://esphome.io/components/sensor/ntc
+# Solar Panel Thermistor sensor
+  - platform: ntc
+    name: Panel Temperature
+    id: panel_temperature
+    sensor: panel_thermistor
+    calibration:
+      - 15310Ohm -> 16°C
+      - 10000Ohm -> 25°C
+      - 3602Ohm -> 50°C
+
+# Water Temperature Thermistor sensor
+  - platform: ntc
+    name: Water Temperature
+    id: water_temperature
+    sensor: water_thermistor
+    calibration:
+      - 15310Ohm -> 16°C
+      - 10000Ohm -> 25°C
+      - 3602Ohm -> 50°C
+
+# https://esphome.io/components/sensor/resistance
+  - platform: resistance
+    internal: True
+    id: panel_thermistor
+    sensor: panel_thermistor_adc
+    configuration: DOWNSTREAM
+    resistor: 5.6kOhm
+    name: Panel Resistance Sensor
+    reference_voltage: 3.3V
+    
+  - platform: resistance
+    internal: True
+    id: water_thermistor
+    sensor: water_thermistor_adc
+    configuration: DOWNSTREAM
+    resistor: 5.6kOhm
+    name: Water Resistance Sensor
+    reference_voltage: 3.3V
+
+# https://esphome.io/components/sensor/adc
+  - platform: adc
+    internal: True
+    id: panel_thermistor_adc
+    pin: GPIO33
+    name: Panel Thermistor ADC
+    update_interval: 30s    
+    attenuation: 11db
+    filters:
+      - offset: -0.02
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 5
+
+  - platform: adc
+    internal: True
+    id: water_thermistor_adc
+    pin: GPIO32
+    name: Water Thermistor ADC
+    update_interval: 30s    
+    attenuation: 11db
+    filters:
+      - offset: -0.02
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 5
+
+# Valve Actuator Current sensor measures peak voltage across a shunt
+# resistor (1 ohm) from an AC sine wave (after half wave rectifier), 
+# we measure peak voltage with help of a 10uF capacitor after the
+# rectifier which holds this at the peak voltage.
+# Finally, we multiply by 0.707 to get actual RMS current, instead of peak.
+  - platform: adc
+    pin: GPIO36
+    name: "Valve Actuator Current"
+    id: valve_actuator_amps
+    attenuation: 6db
+# NOTE: update_interval of 300s here, but we manually update every 3s when
+#       the actuator power is on, if power is off, current *should* be zero.
+    update_interval: 300s    
+    filters:
+      - lambda: if (x < 0.15) { return 0.0; } else { return x; }     
+      - multiply: 0.707
+# NOTE: values above 0.6 amps indicate a fault, possibly a short circuit
+#       due to a water leak from the valve, or a short in the motor, or
+#       a very heavy load on the motor (valve stuck).
+    on_value_range:
+      - above: 0.6
+        then:
+          - switch.turn_off: valve_power_relay
+
+  - platform: wifi_signal
+    name: "WiFi Signal dB"
+    id: wifi_signal_db
+    entity_category: "diagnostic"
+    update_interval: 60s
+  
