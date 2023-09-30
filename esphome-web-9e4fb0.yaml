@@ -58,10 +58,6 @@ uart:
   tx_pin: GPIO14
   rx_pin: GPIO27
   baud_rate: 9600
-custom_component:
-  - lambda: |-
-      auto myPoolPump = new PoolPumpRS485(id(pump_uart_bus));
-      return {myPoolPump};
 
 # The two relays are used to send 24 VAC power to the valve actuator:
 # 1. valve_direction_relay:
@@ -80,8 +76,10 @@ switch:
     inverted: True
     on_turn_on:
       then:
+        - switch.turn_on: valve_power_relay
         - delay: 35s
         - switch.turn_off: valve_direction_relay
+        - switch.turn_off: valve_power_relay
 
   - platform: gpio
     name: "Valve Power Relay"
@@ -99,7 +97,29 @@ switch:
         - switch.turn_off: valve_power_relay
         - switch.turn_off: valve_direction_relay
 
+number:
+  - platform: template
+    name: "Pump Speed"
+    id: pump_speed
+    max_value: 3000
+    min_value: 0
+    step: 10
+    set_action:
+      - lambda: |-
+          ESP_LOGD("custom", "set pump speed: %0.0f", x);
+          //id(pool_pump_rs485).setPumpSpeed(x);
+
 sensor:
+  - platform: custom
+    id: pool_pump_rs485
+    lambda: |-
+      auto myPoolPump = new PoolPumpRS485(id(pump_uart_bus));
+      App.register_component(myPoolPump);
+      return {myPoolPump->rpmSensor, myPoolPump->wattsSensor};
+    sensors:
+      - name: "RPM Sensor"
+      - name: "Watts Sensor"
+      
 # https://esphome.io/components/sensor/ntc
 # Solar Panel Thermistor sensor
   - platform: ntc

@@ -7,13 +7,35 @@
 class PoolPumpRS485 : public Component, public UARTDevice {
  public:
   PoolPumpRS485(UARTComponent *parent) : UARTDevice(parent) {}
+ 
+  Sensor* rpmSensor = new Sensor();
+  Sensor* wattsSensor = new Sensor();
 
+  const uint8_t pumpStatusRequest[10] = { 0x00, 0xFF, 0xA5, 0x00, 0x60, 0x10, 0x07, 0x00, 0x01, 0x1C };
+
+  // 
+  // setup() -- one time setup
+  //
   void setup() override {
     // nothing to do here
   }
 
+  //
+  // loop() -- main loop, called about every 16 milliseconds
+  //
+  void loop() override {
+    if (isPumpStatusTime()) {
+      write_array(pumpStatusRequest, sizeof(pumpStatusRequest));
+    }
 
-  // typical message: 00 FF A5 00 60 10 02 02 03 96 01 B2
+    while (available()) {
+      const uint8_t byte = read();
+      handleReceivedByte(byte);
+    }
+  }
+
+  //
+  // RS-485 Message Parsing States for Pump and Controller
   // 
   enum MsgStates { 
     expectStart,	// message starts with FF
@@ -28,6 +50,9 @@ class PoolPumpRS485 : public Component, public UARTDevice {
     expectChkL  	// Checksum lo byte
   };
 
+  // 
+  // RS-485 Received Message Data
+  //
   MsgStates msgState = expectStart;
   uint8_t msgSrc = 0;
   uint8_t msgDst = 0;
@@ -37,43 +62,43 @@ class PoolPumpRS485 : public Component, public UARTDevice {
   uint8_t msgData[MAXMSGDATA];
   uint16_t msgChecksum = 0;
 
-
-
-  const size_t MaxBytes = 8;
-  unsigned long totalRead = 0;
-
-  void loop() override {
-    while (available()) {
-      uint8_t byte = read();
-      parseMsgByte(byte);
-    }
-
-/*
-    if (available()) {
-      uint8_t bytes[MaxBytes];
-      unsigned long nRead = 0;
-
-      while (available()) {
-        bytes[nRead++] = read();
-	totalRead++;
-
-	if (nRead >= MaxBytes)  {
-          printBytes(bytes, nRead, totalRead);
-          nRead = 0;
-        }
-      }
-
-      if (nRead > 0) {
-        printBytes(bytes, nRead, totalRead);
-      }
-    }
-*/
+  void setPumpSpeed(int speed) {
+    ESP_LOGD("custom","Set Pump Speed: %d", speed);
   }
 
+  // 
+  // isPumpStatusTime -- determines if we should request pump status now
+  //
+  bool isPumpStatusTime() {
+    static unsigned long msLastPumpStatus = 0;
+    const unsigned long msNow = millis();
+
+    if (msLastPumpStatus == 0) {
+      msLastPumpStatus = msNow;
+      return false;	// first time called
+    }
+ 
+    if (msNow < msLastPumpStatus) {
+      // millis wraps around (every 50 days)
+      msLastPumpStatus = msNow;
+      return false;
+    }
+
+    const unsigned long msElapsed = msNow - msLastPumpStatus;
+    if (msElapsed >= 15000 && msgState == expectStart) {
+      // 15 seconds has elapsed, no message incoming now, request pump status 
+      msLastPumpStatus = msNow;
+      return true;
+    }
+    return false;
+  }
+
+  //
+  // printMsg -- prints out received RS-485 message to debug output
+  //
   void printMsg() {
-    char str[255];
-    uint16_t watts;
-    uint16_t rpm;
+    static uint16_t pumpWatts = 9999;
+    static uint16_t pumpRPM   = 9999;
 
     // ignore certain messages for now
     switch (msgCmd) {
@@ -82,6 +107,10 @@ class PoolPumpRS485 : public Component, public UARTDevice {
         return;
     }
 
+    const uint16_t expChecksum = expectedChecksum();
+    const bool checksumGood = (expChecksum == msgChecksum);
+
+    char str[255];
     if (msgSrc == 0x60 && msgDst == 0x10) {
       strcpy(str, "RS-485: Pump->Ctlr");
     } else if (msgSrc == 0x10 && msgDst == 0x60) {
@@ -98,46 +127,65 @@ class PoolPumpRS485 : public Component, public UARTDevice {
       case 6:  sprintf(str+strlen(str), " 6.Pump On/Off");      break;
       case 7:  sprintf(str+strlen(str), " 7.Status");           break;
       case 9:  sprintf(str+strlen(str), " 9.Run @GPM");         break;
-
-      default: 
-	sprintf(str + strlen(str), " Cmd=%u (x%02X)", msgCmd, msgCmd);
+      default: sprintf(str+strlen(str), " %u. (x%02X)", msgCmd, msgCmd);
     }
-    sprintf(str + strlen(str), " Len=%2u(x%02X)", msgLen, msgLen);
+    sprintf(str + strlen(str), " %2ub", msgLen);
 
     switch (msgCmd) {
-      case 7:
-        if (msgLen >= 7) {
-          sprintf(str+strlen(str), msgData[0] == 0x0A ? " ON" : " OFF");
-	  watts = (msgData[3] << 8) | msgData[4];
-	  rpm = (msgData[5] << 8) | msgData[6];
-	  sprintf(str+strlen(str), " watts: %u, rpm: %u", watts, rpm);
+      case 7:	// pump status
+        for (int i=0; i<msgLen; i++) {
+          sprintf(str+strlen(str), "%02X", msgData[i]);
+        }
+        if (checksumGood && msgLen >= 7) {
+	  uint16_t watts = (msgData[3] << 8) | msgData[4];
+	  uint16_t rpm   = (msgData[5] << 8) | msgData[6];
+	  sprintf(str+strlen(str), " %uw %urpm", watts, rpm);
+	
+          if (rpm != pumpRPM) {
+            // RPM changed, publish new value
+            pumpRPM = rpm;
+	    rpmSensor->publish_state(rpm);
+          }
+          if (watts != pumpWatts) {
+            // Watts changed, publish new value
+            pumpWatts = watts;
+            wattsSensor->publish_state(watts);
+          }
         }
         break;
 
       default:
         for (int i = 0; i < msgLen; ++i) {
-          sprintf(str + strlen(str), " %02X", msgData[i]);
+          sprintf(str+strlen(str), " %02X", msgData[i]);
         }
     }
 
-    sprintf(str + strlen(str), " (x%04X)", msgChecksum);
+    if (checksumGood) {
+      sprintf(str+strlen(str), " (OK)");
+    } else {
+      sprintf(str+strlen(str), " (x%04X != %04X) <<<ERR", msgChecksum, expChecksum);
+    }
 
     ESP_LOGD("custom", str);
   }
 
-  void printBytes(uint8_t* bytes, unsigned long count, unsigned long totalRead) {
-      char str[120];
-      str[0] = 0;
+  uint16_t expectedChecksum() {
+    uint16_t result = 0xA5;
+    result += uint16_t(msgDst);
+    result += uint16_t(msgSrc);
+    result += uint16_t(msgCmd);
+    result += uint16_t(msgLen);
 
-      for (size_t i = 0; i < count; ++i) {
-          sprintf(str + strlen(str), " %02X", bytes[i]);
-      }
-
-      ESP_LOGD("custom", "RS-485: (%lu) %lu: %s", totalRead, count, str);
+    for (int i=0; i<msgLen; i++) {
+      result += uint16_t(msgData[i]);
+    } 
+    return result;
   }
 
-
-  void parseMsgByte(uint8_t byte) {
+  //
+  // handleReceivedByte -- updates received message data according to state
+  //
+  void handleReceivedByte(uint8_t byte) {
     switch (msgState) {
       case expectStart:
         if (byte == 0xff) {
@@ -219,4 +267,3 @@ class PoolPumpRS485 : public Component, public UARTDevice {
   }
 
 };
-
