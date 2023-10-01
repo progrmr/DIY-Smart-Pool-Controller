@@ -52,6 +52,8 @@ wifi:
 
 #
 # UART is used for RS-485 serial comm with the Pentair Pool Pump
+# the PoolPumpRS485 custom component class handles the actual
+# sending and receiving messages via the RS-485 serial port.
 #
 uart:
   id: pump_uart_bus
@@ -71,9 +73,9 @@ uart:
 switch:
   - platform: gpio
     name: "Valve Direction Relay"
-    pin: GPIO22
     id: valve_direction_relay
     inverted: True
+    pin: GPIO22
     on_turn_on:
       then:
         - switch.turn_on: valve_power_relay
@@ -83,9 +85,9 @@ switch:
 
   - platform: gpio
     name: "Valve Power Relay"
-    pin: GPIO23
     id: valve_power_relay
     inverted: True
+    pin: GPIO23
     on_turn_on:
       then:
         - repeat:
@@ -106,14 +108,14 @@ number:
     step: 10
     set_action:
       - lambda: |-
-          ESP_LOGD("custom", "set pump speed: %0.0f", x);
-          //id(pool_pump_rs485).setPumpSpeed(x);
+          PoolPumpRS485::instance->setPumpSpeed(lroundf(x));
 
 sensor:
   - platform: custom
     id: pool_pump_rs485
     lambda: |-
       auto myPoolPump = new PoolPumpRS485(id(pump_uart_bus));
+      PoolPumpRS485::instance = myPoolPump;   // save singleton instance
       App.register_component(myPoolPump);
       return {myPoolPump->rpmSensor, myPoolPump->wattsSensor};
     sensors:
