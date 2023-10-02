@@ -101,6 +101,26 @@ switch:
 
 number:
   - platform: template
+    name: "Current Limit"
+    id: current_limit
+    optimistic: True
+    restore_value: True
+    max_value: 9.9
+    min_value: 0.1
+    step: 0.1
+    initial_value: 0.6
+
+  - platform: template
+    name: "Peak Current"
+    id: peak_current
+    optimistic: True
+    restore_value: True
+    max_value: 9.9
+    min_value: 0.0
+    step: 0.1
+    initial_value: 0.0
+
+  - platform: template
     name: "Pump Speed"
     id: pump_speed
     max_value: 3000
@@ -117,7 +137,7 @@ sensor:
       auto myPoolPump = new PoolPumpRS485(id(pump_uart_bus));
       PoolPumpRS485::instance = myPoolPump;   // save singleton instance
       App.register_component(myPoolPump);
-      return {myPoolPump->rpmSensor, myPoolPump->wattsSensor};
+      return {myPoolPump->rpmSensor, myPoolPump->wattsSensor}; 
     sensors:
       - name: "RPM Sensor"
       - name: "Watts Sensor"
@@ -132,6 +152,10 @@ sensor:
       - 15310Ohm -> 16°C
       - 10000Ohm -> 25°C
       - 3602Ohm -> 50°C
+    filters:
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 5
 
 # Water Temperature Thermistor sensor
   - platform: ntc
@@ -142,6 +166,11 @@ sensor:
       - 15310Ohm -> 16°C
       - 10000Ohm -> 25°C
       - 3602Ohm -> 50°C
+    filters:
+      - offset: 0.11
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 5
 
 # https://esphome.io/components/sensor/resistance
   - platform: resistance
@@ -172,9 +201,6 @@ sensor:
     attenuation: 11db
     filters:
       - offset: -0.02
-      - sliding_window_moving_average:
-          window_size: 5
-          send_every: 5
 
   - platform: adc
     internal: True
@@ -185,9 +211,6 @@ sensor:
     attenuation: 11db
     filters:
       - offset: -0.02
-      - sliding_window_moving_average:
-          window_size: 5
-          send_every: 5
 
 # Valve Actuator Current sensor measures peak voltage across a shunt
 # resistor (1 ohm) from an AC sine wave (after half wave rectifier), 
@@ -205,13 +228,13 @@ sensor:
     filters:
       - lambda: if (x < 0.15) { return 0.0; } else { return x; }     
       - multiply: 0.707
-# NOTE: values above 0.6 amps indicate a fault, possibly a short circuit
-#       due to a water leak from the valve, or a short in the motor, or
-#       a very heavy load on the motor (valve stuck).
-    on_value_range:
-      - above: 0.6
-        then:
-          - switch.turn_off: valve_power_relay
+    on_value:
+      - lambda: |-
+          auto peakCurrent = id(peak_current);
+          float previousPeak = peakCurrent->state;
+          if (x > previousPeak) {
+            peakCurrent->publish_state(x);
+          }
 
   - platform: wifi_signal
     name: "WiFi Signal dB"

@@ -45,7 +45,12 @@ class PoolPumpRS485 : public Component, public UARTDevice {
   }; 
 
   bool shouldPollPumpStatus = true;
-  unsigned long msLastPumpStatus = 0;
+  unsigned long msLastStatusPoll = 0;
+
+  unsigned long msLastPumpStatusRcvd = 0; 
+  uint16_t lastPumpRPM = 9999;
+  uint16_t lastPumpWatts = 9999;
+
   MsgStates msgState = expectStart;
   Message msg;
 
@@ -76,7 +81,6 @@ class PoolPumpRS485 : public Component, public UARTDevice {
     }
   }
 
-
   //
   // setPumpSpeed -- needs to check if the pump is running, turn it on
   //                 if needed, then set it to the desired RPM.
@@ -86,28 +90,27 @@ class PoolPumpRS485 : public Component, public UARTDevice {
     ESP_LOGD("custom","Set Pump Speed: %ld (Not Implemented Yet)", speed);
   }
 
-
   // 
   // isPumpStatusTime -- determines if we should request pump status now
   //
   bool isPumpStatusTime(const MsgStates msgState) {
     const unsigned long msNow = millis();
 
-    if (msLastPumpStatus == 0) {
-      msLastPumpStatus = msNow;
+    if (msLastStatusPoll == 0) {
+      msLastStatusPoll = msNow;
       return false;	// first time called
     }
  
-    if (msNow < msLastPumpStatus) {
+    if (msNow < msLastStatusPoll) {
       // millis wraps around (every 50 days)
-      msLastPumpStatus = msNow;
+      msLastStatusPoll = msNow;
       return false;
     }
 
-    const unsigned long msElapsed = msNow - msLastPumpStatus;
+    const unsigned long msElapsed = msNow - msLastStatusPoll;
     if (msElapsed >= 15000 && msgState == expectStart) {
       // 15 seconds has elapsed, no message incoming now, request pump status 
-      msLastPumpStatus = msNow;
+      msLastStatusPoll = msNow;
       return true;
     }
     return false;
@@ -254,15 +257,19 @@ class PoolPumpRS485 : public Component, public UARTDevice {
          sprintf(str+strlen(str), "%02X", msg->data[i]);
         }
         if (msgValid && msg->actualLen >= 7) {
-	  uint16_t watts = (msg->data[3] << 8) | msg->data[4];
-	  uint16_t rpm   = (msg->data[5] << 8) | msg->data[6];
-	  sprintf(str+strlen(str), " %uw %urpm", watts, rpm);
+          //---------------------------
+          // Save Pump RPM and Watts
+          //---------------------------
+          msLastPumpStatusRcvd = millis();
+	  lastPumpWatts = (msg->data[3] << 8) | msg->data[4];
+	  lastPumpRPM   = (msg->data[5] << 8) | msg->data[6];
+	  sprintf(str+strlen(str), " %uw %urpm", lastPumpWatts, lastPumpRPM);
 	
           //---------------------------
           // publish sensor data
           //---------------------------
-	  instance->rpmSensor->publish_state(rpm);
-          instance->wattsSensor->publish_state(watts);
+	  instance->rpmSensor->publish_state(lastPumpRPM);
+          instance->wattsSensor->publish_state(lastPumpWatts);
         }
         break;
 
