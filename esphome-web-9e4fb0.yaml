@@ -12,12 +12,36 @@ esphome:
   on_boot:
     priority: -10
     then:
+      - delay: 30s
+      - lambda: |-
+          //---------------------
+          // need to call setPumpSpeed after reboot in case we
+          // are requesting a particular pump speed.  The C++ class gets
+          // reinitialized when booting and we need to restore the speed.
+          //---------------------
+          auto rpmRequest = id(pump_speed_request);
+          if (rpmRequest->state != NAN) {
+            ESP_LOGD("custom","===== BOOT: restoring pump RPM request state");
+            long speed = lroundf(rpmRequest->state);
+            PoolPumpRS485::instance->setPumpSpeed(speed);
+          }
+      - lambda: |-
+          //---------------------
+          // need to init various sensors, they don't get
+          // restored after a reboot
+          //---------------------
+          float curTemp = id(water_temperature).state;
+          id(minimum_water_temperature)->publish_state(curTemp);
+          id(maximum_water_temperature)->publish_state(curTemp);
+          id(valve_actuator_amps)->publish_state(0);
+          id(peak_current)->publish_state(0);
+          id(actuation_time)->publish_state(0);
       - lambda: |-
           uint32_t notConnectedCounter = 0;
           while (!WiFi.isConnected()) {
             delay(100);   // delay 100 ms
             notConnectedCounter++;
-            if(notConnectedCounter > 600) { // Reset board if not connected after 60s
+            if(notConnectedCounter > 300) { // Reset board if not connected after 30s
               ESP.restart();
             }
           }
@@ -50,6 +74,22 @@ wifi:
     static_ip: ${deviceip}
     gateway: 192.168.0.1
     subnet: 255.255.255.0
+
+# https://esphome.io/components/time/index.html
+time:
+  - platform: sntp
+    on_time_sync: 
+      then:
+        - logger.log: "Pool Controller Time Synced"
+    on_time:
+      - seconds: 0
+        minutes: 0
+        hours: 0
+        then:
+          - lambda: |-
+              float temp = id(water_temperature)->state;
+              id(minimum_water_temperature)->publish_state(temp);
+              id(maximum_water_temperature)->publish_state(temp);
 
 # UART is used for RS-485 serial comm with the Pentair Pool Pump
 # the PoolPumpRS485 custom component class handles the actual
@@ -126,6 +166,8 @@ number:
     min_value: 0
     step: 10
     initial_value: 0
+    # the lambda below is also duplicated in the on_boot section above
+    # so that the pump speed request is restored after a reboot:
     set_action:
       - lambda: |-
           PoolPumpRS485::instance->setPumpSpeed(lroundf(x));
@@ -159,11 +201,13 @@ sensor:
       return {va->peakCurrentSensor, va->actuationTimeSensor};
     sensors:
       - name: "Peak Current"
+        id: peak_current
         accuracy_decimals: 3
         unit_of_measurement: A
         device_class: "current"
         state_class: "measurement"
       - name: "Actuation Time"
+        id: actuation_time
         accuracy_decimals: 0
         unit_of_measurement: s
         device_class: "duration"
@@ -180,9 +224,36 @@ sensor:
       - 10000Ohm -> 25°C
       - 3602Ohm -> 50°C
     filters:
+      - offset: 0.6
       - sliding_window_moving_average:
           window_size: 5
           send_every: 5
+
+# Water Temp Daily Minimum/Maximum sensor
+# https://esphome.io/components/sensor/template.html
+  - platform: template
+    name: Minimum Water Temperature
+    id: minimum_water_temperature
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 1
+    # NOTE: updates are done elsewhere:
+    # (1) midnight (resets min from current) in the time sntp above, 
+    # (2) whenever the water_temperature sensor below updates.
+    update_interval: never
+
+  - platform: template
+    name: Maximum Water Temperature
+    id: maximum_water_temperature
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 1
+    # NOTE: updates are done elsewhere:
+    # (1) midnight (resets min from current) in the time sntp above, 
+    # (2) whenever the water_temperature sensor below updates.
+    update_interval: never
 
 # Water Temperature Thermistor sensor
   - platform: ntc
@@ -193,11 +264,21 @@ sensor:
       - 15310Ohm -> 16°C
       - 10000Ohm -> 25°C
       - 3602Ohm -> 50°C
-#    filters:
-#      - offset: 0.11
-#      - sliding_window_moving_average:
-#          window_size: 5
-#          send_every: 5
+    on_value:
+      lambda: |-
+        auto minTemp = id(minimum_water_temperature);
+        if (x < minTemp->state || minTemp->state == NAN) {
+          minTemp->publish_state(x);
+        }
+        auto maxTemp = id(maximum_water_temperature);
+        if (x > maxTemp->state || minTemp->state == NAN) {
+          maxTemp->publish_state(x);
+        }
+    filters:
+      - offset: 0.11
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 5
 
 # https://esphome.io/components/sensor/resistance
   - platform: resistance
@@ -224,7 +305,7 @@ sensor:
     id: panel_thermistor_adc
     pin: GPIO33
     name: Panel Thermistor ADC
-    update_interval: 30s    
+    update_interval: 31s    
     attenuation: 11db
     filters:
       - offset: -0.02
@@ -254,12 +335,12 @@ sensor:
     attenuation: 6db
 # NOTE: update_interval of never here, but we manually update every 2-3s when
 #       the actuator power is on, if power is off, current *should* be zero.
-    update_interval: never    
+    update_interval: never  
     filters:
-# NOTE: if x < 0.15 then current is really 0, it reads 0.15 because
-#       the ADC has a minimum voltage that it reads and shows that value
-#       even when there is no current flowing.
       - lambda: |-
+          // if x < 0.15 then current is really 0, it reads 0.15 because
+          // the ADC has a minimum voltage that it reads and shows that value
+          // even when there is no current flowing (and actual voltage is 0)
           if (x < 0.15) { return 0.0; } else { return x; }     
 # NOTE: multiply by 0.707 to convert peak amps reading to RMS amps value
       - multiply: 0.707
