@@ -1,19 +1,34 @@
-#include <sstream>
-#include <iomanip>
 #include "esphome.h"
 
-#define MAXMSGDATA 255
+#define MaxMsgData 255
+#define PumpPollIntervalMS 15000
+#define PumpId 0x60
+#define CtlrId 0x10
+#define ReplyTimeOutMS 1000
 
 class PoolPumpRS485 : public Component, public UARTDevice {
  public:
   PoolPumpRS485(UARTComponent *parent) : UARTDevice(parent) {}
  
-  Sensor* rpmSensor = new Sensor();
-  Sensor* wattsSensor = new Sensor();
+  typedef unsigned long MilliSec;
+
+  Sensor* rpmSensor = new Sensor();		// pool pump RPM
+  Sensor* wattsSensor = new Sensor();		// pool pump power consumption
+  Sensor* peakCurrentSensor = new Sensor();	// solar diverter valve actuator motor current draw
+  Sensor* actuationTimeSensor = new Sensor();	// solar diverter valve actuation time
 
   static PoolPumpRS485* instance;		// singleton instance
 
-  const uint8_t pumpStatusRequest[10] = { 0x00, 0xFF, 0xA5, 0x00, 0x60, 0x10, 0x07, 0x00, 0x01, 0x1C };
+  // RS-485 Message Sequencing States
+  enum MsgSequencingStates {
+    sendSolarSpeedOn,	// send solarSpeedOn message (if applicable)
+    waitSolarSpeedOn,	// wait for reply to solarSpeedOn message
+    sendSolarSpeedOff,  // send solarSpeedOff message (if applicable)
+    waitSolarSpeedOff,  // wait for reply to solarSpeedOff message
+    sendStatusRequest,  // send pump status request message 
+    waitStatusReply,    // wait for reply to pump status request
+    waitForNextPollInterval,	// wait for next polling interval to start
+  };
 
   //
   // RS-485 Message Parsing States for Pump and Controller
@@ -28,56 +43,171 @@ class PoolPumpRS485 : public Component, public UARTDevice {
     expectLen,		// number of data bytes to follow
     expectData,		// data bytes
     expectChkH,		// checksum hi byte
-    expectChkL  	// checksum lo byte
+    expectChkL, 	// checksum lo byte
+    msgComplete	
+  };
+
+  //
+  // RS-485 Message Actions
+  //
+  enum MsgActions {
+    noAction = 0,
+    requestSetSpeed = 1,
+    requestStatus = 7,
   };
 
   //
   // RS-485 Message Data Structure, not including header
+  //
   struct Message {
     uint8_t dest;
     uint8_t source;
     uint8_t action;
     uint8_t length;		// expected data length
     uint8_t actualLen;		// actual received length
-    uint8_t data[MAXMSGDATA];	// received data
+    uint8_t data[MaxMsgData];	// received data
     uint16_t checksum;		// expected checksum
     uint16_t actualChecksum;	// computed checksum
   }; 
 
-  bool shouldPollPumpStatus = true;
-  unsigned long msLastStatusPoll = 0;
+  const uint8_t msgHeader[4] = { 0x00, 0xFF, 0xA5, 0x00 };	// starts a message transmittion
+  const uint8_t msgDestination[2] = { PumpId, CtlrId };		// destination and source of message
 
-  unsigned long msLastPumpStatusRcvd = 0; 
+  // format: action, length, data, CRChi, CRClo 
+  const uint8_t pumpStatusRequest[4] = { requestStatus, 0x00, 0x01, 0x1C };
+  const uint8_t pumpSolarSpeedOn [8] = { requestSetSpeed, 0x04, 0x03, 0x21, 0x00, 0x20, 0x01, 0x5E };
+  const uint8_t pumpSolarSpeedOff[8] = { requestSetSpeed, 0x04, 0x03, 0x21, 0x00, 0x00, 0x01, 0x3E };
+
+  bool shouldRequestSolarSpeedOn = false;
+  bool shouldRequestSolarSpeedOff = false;
+
+  MilliSec msLastPumpPoll = 0;
+
   uint16_t lastPumpRPM = 9999;
   uint16_t lastPumpWatts = 9999;
 
-  MsgStates msgState = expectStart;
-  Message msg;
+  float peakActuatorCurrent = 0.0;
+  MilliSec msActuatorStartTime = 0;
+  float actuationTime = 0.0;		// time in seconds
 
   // 
   // setup() -- one time setup
   //
   void setup() override {
     // not much to do here
+    msLastPumpPoll = millis();		// init time of "previous" polling interval
   }
 
   //
   // loop() -- main loop, called about every 16 milliseconds
   //
   void loop() override {
-    if (shouldPollPumpStatus && isPumpStatusTime(msgState)) {
-      //
-      // transmit a pump status request via RS-485 serial
-      //
-      write_array(pumpStatusRequest, sizeof(pumpStatusRequest));
+    static MsgSequencingStates msgSequenceState = waitForNextPollInterval;
+    static MsgStates msgState = expectStart;
+    static MilliSec msReplyWaitStart = 0;
+    static Message msg;
+
+    switch (msgSequenceState) {
+       case waitSolarSpeedOn:
+       case waitSolarSpeedOff:
+       case waitStatusReply:
+         //-------------------------------
+	 // waiting for incoming message
+         //-------------------------------
+	 while (available()) {
+	   uint8_t byte = read();
+	   msgState = gotMessageByte(byte, msgState, &msg);
+
+	   if (msgState == msgComplete) {
+	     if (checkReceivedMessage(&msg)) {
+	       // we received a reply message
+	       switch (msg.action) {
+	         case requestSetSpeed:
+	           // NOT IMPLEMENTED YET -- verify the pump did what we requested, 
+	           // if it didn't there's not much we can do just report errors
+	           break;
+
+	         case requestStatus:
+	           handlePumpStatus(&msg);
+                   break;
+                 
+                 default:
+	           // invalid or not of interest message
+	           ESP_LOGD("custom","***** WARNING: unexpected RS-485 message received");
+	       }
+	     }
+	   }
+         }
+         if (msgState != msgComplete) {
+           MilliSec elapsed = millis() - msReplyWaitStart;
+           if (elapsed >= ReplyTimeOutMS) {
+             msgState = msgComplete;		// timed out, give up, call it done and move on
+             ESP_LOGD("custom","***** WARNING: timed out waiting for RS-485 message (seq:%d)", msgSequenceState);
+           }
+         }
+         break;
+
+       default:
+         break;
     }
 
-    //
-    // recieve RS-485 serial data, handle incoming messages
-    //
-    while (available()) {
-      uint8_t byte = read();
-      gotMessageByte(byte);
+    switch (msgSequenceState) {
+       case waitForNextPollInterval:
+    	 if (isPumpPollingTime()) {
+           msgSequenceState = sendSolarSpeedOn;
+           msLastPumpPoll = millis();
+         }
+         break;   
+
+       case sendSolarSpeedOn:
+         if (shouldRequestSolarSpeedOn) {
+           // transmit a request for pump to switch on to solar speed
+           sendMessage(pumpSolarSpeedOn, sizeof(pumpSolarSpeedOn));
+           msgSequenceState = waitSolarSpeedOn;
+           msgState = expectStart;
+           msReplyWaitStart = millis();
+         } else {
+           msgSequenceState = sendSolarSpeedOff;
+         }
+         break;
+
+       case sendSolarSpeedOff:
+         if (shouldRequestSolarSpeedOff) {
+           // transmit a request for pump to switch off solar speed
+           sendMessage(pumpSolarSpeedOff, sizeof(pumpSolarSpeedOff));
+           msgSequenceState = waitSolarSpeedOff;
+           msgState = expectStart;
+           msReplyWaitStart = millis();
+         } else {
+           msgSequenceState = sendStatusRequest;
+         }
+         break;
+
+       case sendStatusRequest:
+         // transmit a pump status request via RS-485 serial
+         sendMessage(pumpStatusRequest, sizeof(pumpStatusRequest));
+         msgSequenceState = waitStatusReply;
+         msgState = expectStart;
+         msReplyWaitStart = millis();
+         break;
+         
+       case waitSolarSpeedOn:
+         if (msgState == msgComplete) {
+           msgSequenceState = sendStatusRequest;		// next sequence state
+         }
+         break;
+
+       case waitSolarSpeedOff:
+         if (msgState == msgComplete) {
+           msgSequenceState = sendStatusRequest;		// next sequence state
+         }
+         break;
+
+       case waitStatusReply:
+         if (msgState == msgComplete) {
+           msgSequenceState = waitForNextPollInterval;		// next sequence state
+         }
+         break;
     }
   }
 
@@ -86,125 +216,129 @@ class PoolPumpRS485 : public Component, public UARTDevice {
   //                 if needed, then set it to the desired RPM.
   //
   void setPumpSpeed(long speed) {
-    // NOT IMPLEMENTED YET
-    ESP_LOGD("custom","Set Pump Speed: %ld (Not Implemented Yet)", speed);
+    if (speed == 2400) {
+      // request pump revert to normal programmed speed
+      shouldRequestSolarSpeedOn  = false;
+      shouldRequestSolarSpeedOff = true;
+
+    } else if (speed == 2700) {
+      // request pump switch to solar on speed
+      shouldRequestSolarSpeedOn  = true;
+      shouldRequestSolarSpeedOff = false;
+
+    } else {
+      // no requests, stop sending these messages
+      shouldRequestSolarSpeedOn  = false;
+      shouldRequestSolarSpeedOff = false;
+    }
   }
 
-  // 
-  // isPumpStatusTime -- determines if we should request pump status now
   //
-  bool isPumpStatusTime(const MsgStates msgState) {
-    const unsigned long msNow = millis();
-
-    if (msLastStatusPoll == 0) {
-      msLastStatusPoll = msNow;
-      return false;	// first time called
-    }
- 
-    if (msNow < msLastStatusPoll) {
-      // millis wraps around (every 50 days)
-      msLastStatusPoll = msNow;
-      return false;
+  // setActuatorCurrent
+  //
+  void setActuatorCurrent(float amps) {
+    if (amps > 0 && msActuatorStartTime == 0) {
+      msActuatorStartTime = millis();
     }
 
-    const unsigned long msElapsed = msNow - msLastStatusPoll;
-    if (msElapsed >= 15000 && msgState == expectStart) {
-      // 15 seconds has elapsed, no message incoming now, request pump status 
-      msLastStatusPoll = msNow;
-      return true;
+    if (amps > peakActuatorCurrent) {
+      peakActuatorCurrent = amps;
+      peakCurrentSensor->publish_state(amps);
     }
-    return false;
+
+    if (msActuatorStartTime != 0) {
+      MilliSec elapsed = millis() - msActuatorStartTime;
+      actuationTimeSensor->publish_state(elapsed / 1000.0);
+
+      if (amps == 0) {
+        msActuatorStartTime = 0;	// done, reset start clock
+      }
+    }  
+  } 
+
+  // 
+  // isPumpPollingTime -- determines if we should send pump messages now
+  //
+  const bool isPumpPollingTime() {
+    const unsigned long msElapsed = millis() - msLastPumpPoll;
+
+    return msElapsed >= PumpPollIntervalMS;
+  }
+
+  //
+  // sendMessage -- send message via RS-485 serial to the pump
+  //
+  const void sendMessage(const uint8_t* message, const size_t length) {
+    write_array(msgHeader, sizeof(msgHeader));
+    write_array(msgDestination, sizeof(msgDestination));
+    write_array(message, length);
   }
 
   //
   // gotMessageByte -- updates received message data according to state
   //
-  void gotMessageByte(uint8_t byte) {
+  const MsgStates gotMessageByte(const uint8_t byte, const MsgStates msgState, Message* msg) {
     switch (msgState) {
       case expectStart:
-        if (byte == 0xff) {
-          msgState = expectA5;
-        } // else no state change
-        break;
+        return (byte == 0xff) ? expectA5 : expectStart;
 
       case expectA5:
-        if (byte == 0xa5) {
-          msgState = expect00;
-        } else {
-          msgState = expectStart;	// invalid, start over
-        }
-        break;
+        return (byte == 0xa5) ? expect00 : expectStart;
 
       case expect00:
-        if (byte == 0x00) {
-          msgState = expectDst;
-        } else {
-          msgState = expectStart;	// invalid, start over
-        }
-        break;
+        return (byte == 0x00) ? expectDst : expectStart;
 
       case expectDst:
-        if (byte == 0x60 || byte == 0x10) {
-          msg.dest = byte;
-          msgState = expectSrc;
-        } else {
-          msgState = expectStart;	// invalid, start over
+        if (byte == PumpId || byte == CtlrId) {
+          msg->dest = byte;
+          return expectSrc;
         }
         break;
  
       case expectSrc:
-        if (byte == 0x60 || byte == 0x10) {
-          msg.source = byte;
-          msgState = expectCmd;
-        } else {
-          msgState = expectStart;	// invalid, start over
+        if (byte == PumpId || byte == CtlrId) {
+          msg->source = byte;
+          return expectCmd;
         }
         break;
 
       case expectCmd:
-        msg.action = byte;
-        msgState = expectLen;
-        break;
+        msg->action = byte;
+        return expectLen;
 
       case expectLen:
-        msg.length = byte;		// #bytes expected in message
-        msg.actualLen = 0;		// #bytes actually recieved
-        if (msg.length == 0) {
-          msgState = expectChkH;	// no data expected, checksum next
-        } else {
-          msgState = expectData;	// expect data
-        }
-        break;
+        msg->length = byte;		// #bytes expected in message
+        msg->actualLen = 0;		// #bytes actually recieved
+        // if no data then checksum is next
+        return (msg->length == 0) ? expectChkH : expectData;
    
       case expectData:
-        if (msg.actualLen > msg.length || msg.actualLen >= MAXMSGDATA) {
-          msgState = expectStart;	// invalid state, start over
-          break;
+        if (msg->actualLen > msg->length || msg->actualLen >= MaxMsgData) {
+          return expectStart;		// invalid length, start over
         }
-        msg.data[msg.actualLen++] = byte;
-        if (msg.actualLen == msg.length) {
-          msgState = expectChkH;	// got all the data bytes, checksum next
-        } 
-        break;
+
+        msg->data[msg->actualLen++] = byte;
+
+        // if got all the data bytes, checksum next
+	return (msg->actualLen == msg->length) ? expectChkH : expectData;
 
       case expectChkH:
-        msg.checksum = byte << 8;
-        msgState = expectChkL;
-        break;
+        msg->checksum = byte << 8;
+        return expectChkL;
 
       case expectChkL:
-        msg.checksum |= byte;
-        msg.actualChecksum = computeChecksum(&msg);
-        processMsg(&msg);
-        msgState = expectStart;
-        break;
-    } // end switch
+        msg->checksum |= byte;
+        msg->actualChecksum = computeChecksum(msg);
+        return msgComplete;
+    }
+
+    return expectStart;		// invalid state, start over
   }
 
   //
   // computeChecksum for message
   // 
-  uint16_t computeChecksum(const Message* msg) {
+  const uint16_t computeChecksum(const Message* msg) {
     uint16_t result = 0xA5;
     result += uint16_t(msg->dest);
     result += uint16_t(msg->source);
@@ -218,25 +352,27 @@ class PoolPumpRS485 : public Component, public UARTDevice {
   }
 
   //
-  // processMsg -- handles and prints out received RS-485 message to debug output
+  // checkReceivedMessage -- checks (and debug prints) received RS-485 message 
+  // 
+  // Returns: true if message is valid and of interest
   //
-  void processMsg(const Message* msg) {
+  bool checkReceivedMessage(const Message* msg) {
     // ignore certain messages for now
     switch (msg->action) {
       case 2:
       case 4:
-        return;
+        return false;		// may be valid, but it's not of interest
     }
 
     const bool msgValid = (msg->actualChecksum == msg->checksum);
 
     char str[255];
     if (msg->source == 0x60 && msg->dest == 0x10) {
-      strcpy(str, "RS-485: Pump->Ctlr");
+      strcpy(str, "----- RS-485: Pump->Ctlr");
     } else if (msg->source == 0x10 && msg->dest == 0x60) {
-      strcpy(str, "RS-485: Ctlr->Pump");
+      strcpy(str, "----- RS-485: Ctlr->Pump");
     } else {
-      sprintf(str, "RS-485: %02X->%02X", msg->source, msg->dest);
+      sprintf(str, "********** RS-485: %02X->%02X", msg->source, msg->dest);
     }
    
     switch (msg->action) {
@@ -252,24 +388,10 @@ class PoolPumpRS485 : public Component, public UARTDevice {
     sprintf(str + strlen(str), " #%u: ", msg->length);
 
     switch (msg->action) {
-      case 7:	// pump status
+      case requestStatus:	// pump status
+      case requestSetSpeed:	// pump speed
         for (int i=0; i<msg->actualLen; i++) {
-         sprintf(str+strlen(str), "%02X", msg->data[i]);
-        }
-        if (msgValid && msg->actualLen >= 7) {
-          //---------------------------
-          // Save Pump RPM and Watts
-          //---------------------------
-          msLastPumpStatusRcvd = millis();
-	  lastPumpWatts = (msg->data[3] << 8) | msg->data[4];
-	  lastPumpRPM   = (msg->data[5] << 8) | msg->data[6];
-	  sprintf(str+strlen(str), " %uw %urpm", lastPumpWatts, lastPumpRPM);
-	
-          //---------------------------
-          // publish sensor data
-          //---------------------------
-	  instance->rpmSensor->publish_state(lastPumpRPM);
-          instance->wattsSensor->publish_state(lastPumpWatts);
+          sprintf(str+strlen(str), "%02X", msg->data[i]);
         }
         break;
 
@@ -284,8 +406,23 @@ class PoolPumpRS485 : public Component, public UARTDevice {
     } else {
       sprintf(str+strlen(str), " (x%04X != %04X) <<<ERR", msg->checksum, msg->actualChecksum);
     }
-
     ESP_LOGD("custom", str);
+
+    return msgValid;
+  }
+
+  void handlePumpStatus(const Message* msg) {
+    //---------------------------
+    // Save Pump RPM and Watts
+    //---------------------------
+    lastPumpWatts = (msg->data[3] << 8) | msg->data[4];
+    lastPumpRPM   = (msg->data[5] << 8) | msg->data[6];
+
+    //---------------------------
+    // publish sensor data
+    //---------------------------
+    rpmSensor->publish_state(lastPumpRPM);
+    wattsSensor->publish_state(lastPumpWatts);
   }
 
 };
