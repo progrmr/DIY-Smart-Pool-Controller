@@ -50,11 +50,9 @@ wifi:
     gateway: 192.168.0.1
     subnet: 255.255.255.0
 
-#
 # UART is used for RS-485 serial comm with the Pentair Pool Pump
 # the PoolPumpRS485 custom component class handles the actual
 # sending and receiving messages via the RS-485 serial port.
-#
 uart:
   id: pump_uart_bus
   tx_pin: GPIO14
@@ -80,24 +78,30 @@ switch:
       then:
         - switch.turn_on: valve_power_relay
         - delay: 35s
-        - switch.turn_off: valve_direction_relay
         - switch.turn_off: valve_power_relay
+        - switch.turn_off: valve_direction_relay
 
   - platform: gpio
     name: "Valve Power Relay"
     id: valve_power_relay
     inverted: True
-    pin: GPIO23
+    pin: GPIO23      
     on_turn_on:
       then:
+        - lambda: |-
+            auto myPoolPump = PoolPumpRS485::instance;
+            myPoolPump->peakActuatorCurrent = 0;
+            myPoolPump->msActuatorStartTime = 0;
         - repeat:
-            count: 10
+            count: 32
             then:
-              - delay: 1s
+              - delay: 0.5s
               - component.update: valve_actuator_amps
-              - delay: 2s
+              - delay: 0.5s
         - switch.turn_off: valve_power_relay
         - switch.turn_off: valve_direction_relay
+        - delay: 0.5s
+        - component.update: valve_actuator_amps
 
 number:
   - platform: template
@@ -105,27 +109,24 @@ number:
     id: current_limit
     optimistic: True
     restore_value: True
-    max_value: 9.9
+    max_value: 2.0
     min_value: 0.1
     step: 0.1
     initial_value: 0.6
+    ## NOT IMPLEMENTED YET ##
+    # need to do something with the limit, when actual exceeds limit
 
   - platform: template
-    name: "Peak Current"
-    id: peak_current
+    name: "Pump Speed Request"
+    id: pump_speed_request
     optimistic: True
     restore_value: True
-    max_value: 9.9
-    min_value: 0.0
-    step: 0.1
-    initial_value: 0.0
-
-  - platform: template
-    name: "Pump Speed"
-    id: pump_speed
-    max_value: 3000
+    unit_of_measurement: RPM
+    device_class: speed
+    max_value: 4000
     min_value: 0
     step: 10
+    initial_value: 0
     set_action:
       - lambda: |-
           PoolPumpRS485::instance->setPumpSpeed(lroundf(x));
@@ -137,10 +138,30 @@ sensor:
       auto myPoolPump = new PoolPumpRS485(id(pump_uart_bus));
       PoolPumpRS485::instance = myPoolPump;   // save singleton instance
       App.register_component(myPoolPump);
-      return {myPoolPump->rpmSensor, myPoolPump->wattsSensor}; 
+      return {myPoolPump->rpmSensor, 
+              myPoolPump->wattsSensor, 
+              myPoolPump->peakCurrentSensor,
+              myPoolPump->actuationTimeSensor}; 
     sensors:
       - name: "RPM Sensor"
+        unit_of_measurement: RPM
+        device_class: "speed"
+        state_class: "measurement"
       - name: "Watts Sensor"
+        accuracy_decimals: 0
+        unit_of_measurement: W
+        device_class: "power"
+        state_class: "measurement"
+      - name: "Peak Current"
+        accuracy_decimals: 3
+        unit_of_measurement: A
+        device_class: "current"
+        state_class: "measurement"
+      - name: "Actuation Time"
+        accuracy_decimals: 0
+        unit_of_measurement: s
+        device_class: "duration"
+        state_class: "measurement"
       
 # https://esphome.io/components/sensor/ntc
 # Solar Panel Thermistor sensor
@@ -166,11 +187,11 @@ sensor:
       - 15310Ohm -> 16°C
       - 10000Ohm -> 25°C
       - 3602Ohm -> 50°C
-    filters:
-      - offset: 0.11
-      - sliding_window_moving_average:
-          window_size: 5
-          send_every: 5
+#    filters:
+#      - offset: 0.11
+#      - sliding_window_moving_average:
+#          window_size: 5
+#          send_every: 5
 
 # https://esphome.io/components/sensor/resistance
   - platform: resistance
@@ -214,31 +235,35 @@ sensor:
 
 # Valve Actuator Current sensor measures peak voltage across a shunt
 # resistor (1 ohm) from an AC sine wave (after half wave rectifier), 
-# we measure peak voltage with help of a 10uF capacitor after the
-# rectifier which holds this at the peak voltage.
-# Finally, we multiply by 0.707 to get actual RMS current, instead of peak.
+# We measure peak voltage(amps) with help of a 10uF capacitor after the
+# rectifier which holds at the peak voltage.  There is a 22k resistor
+# on the capacitor so that the voltage reading will decay when
+# the actual current drops.
   - platform: adc
     pin: GPIO36
     name: "Valve Actuator Current"
     id: valve_actuator_amps
+    unit_of_measurement: A
+    accuracy_decimals: 3
     attenuation: 6db
-# NOTE: update_interval of 300s here, but we manually update every 3s when
+# NOTE: update_interval of never here, but we manually update every 2-3s when
 #       the actuator power is on, if power is off, current *should* be zero.
-    update_interval: 300s    
+    update_interval: never    
     filters:
-      - lambda: if (x < 0.15) { return 0.0; } else { return x; }     
+# NOTE: if x < 0.15 then current is really 0, it reads 0.15 because
+#       the ADC has a minimum voltage that it reads and shows that value
+#       even when there is no current flowing.
+      - lambda: |-
+          if (x < 0.15) { return 0.0; } else { return x; }     
+# NOTE: multiply by 0.707 to convert peak amps reading to RMS amps value
       - multiply: 0.707
     on_value:
       - lambda: |-
-          auto peakCurrent = id(peak_current);
-          float previousPeak = peakCurrent->state;
-          if (x > previousPeak) {
-            peakCurrent->publish_state(x);
-          }
+          PoolPumpRS485::instance->setActuatorCurrent(x);
 
   - platform: wifi_signal
     name: "WiFi Signal dB"
     id: wifi_signal_db
     entity_category: "diagnostic"
-    update_interval: 60s
+    update_interval: 120s
   
