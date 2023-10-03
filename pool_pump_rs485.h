@@ -14,8 +14,6 @@ class PoolPumpRS485 : public Component, public UARTDevice {
 
   Sensor* rpmSensor = new Sensor();		// pool pump RPM
   Sensor* wattsSensor = new Sensor();		// pool pump power consumption
-  Sensor* peakCurrentSensor = new Sensor();	// solar diverter valve actuator motor current draw
-  Sensor* actuationTimeSensor = new Sensor();	// solar diverter valve actuation time
 
   static PoolPumpRS485* instance;		// singleton instance
 
@@ -85,10 +83,6 @@ class PoolPumpRS485 : public Component, public UARTDevice {
 
   uint16_t lastPumpRPM = 9999;
   uint16_t lastPumpWatts = 9999;
-
-  float peakActuatorCurrent = 0.0;
-  MilliSec msActuatorStartTime = 0;
-  float actuationTime = 0.0;		// time in seconds
 
   // 
   // setup() -- one time setup
@@ -233,28 +227,6 @@ class PoolPumpRS485 : public Component, public UARTDevice {
     }
   }
 
-  //
-  // setActuatorCurrent
-  //
-  void setActuatorCurrent(float amps) {
-    if (amps > 0 && msActuatorStartTime == 0) {
-      msActuatorStartTime = millis();
-    }
-
-    if (amps > peakActuatorCurrent) {
-      peakActuatorCurrent = amps;
-      peakCurrentSensor->publish_state(amps);
-    }
-
-    if (msActuatorStartTime != 0) {
-      MilliSec elapsed = millis() - msActuatorStartTime;
-      actuationTimeSensor->publish_state(elapsed / 1000.0);
-
-      if (amps == 0) {
-        msActuatorStartTime = 0;	// done, reset start clock
-      }
-    }  
-  } 
 
   // 
   // isPumpPollingTime -- determines if we should send pump messages now

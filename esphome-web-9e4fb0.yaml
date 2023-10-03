@@ -8,6 +8,7 @@ esphome:
   friendly_name: ${friendly_devicename}
   includes:
     - pool_pump_rs485.h
+    - valve_actuator.h
   on_boot:
     priority: -10
     then:
@@ -89,9 +90,7 @@ switch:
     on_turn_on:
       then:
         - lambda: |-
-            auto myPoolPump = PoolPumpRS485::instance;
-            myPoolPump->peakActuatorCurrent = 0;
-            myPoolPump->msActuatorStartTime = 0;
+            ValveActuator::instance->startMeasurements();
         - repeat:
             count: 32
             then:
@@ -139,9 +138,7 @@ sensor:
       PoolPumpRS485::instance = myPoolPump;   // save singleton instance
       App.register_component(myPoolPump);
       return {myPoolPump->rpmSensor, 
-              myPoolPump->wattsSensor, 
-              myPoolPump->peakCurrentSensor,
-              myPoolPump->actuationTimeSensor}; 
+              myPoolPump->wattsSensor}; 
     sensors:
       - name: "RPM Sensor"
         unit_of_measurement: RPM
@@ -152,6 +149,15 @@ sensor:
         unit_of_measurement: W
         device_class: "power"
         state_class: "measurement"
+
+  - platform: custom
+    id: valve_actuator
+    lambda: |-
+      auto va = new ValveActuator();
+      ValveActuator::instance = va;     // save singleton instance
+      App.register_component(va);
+      return {va->peakCurrentSensor, va->actuationTimeSensor};
+    sensors:
       - name: "Peak Current"
         accuracy_decimals: 3
         unit_of_measurement: A
@@ -162,7 +168,7 @@ sensor:
         unit_of_measurement: s
         device_class: "duration"
         state_class: "measurement"
-      
+             
 # https://esphome.io/components/sensor/ntc
 # Solar Panel Thermistor sensor
   - platform: ntc
@@ -259,7 +265,7 @@ sensor:
       - multiply: 0.707
     on_value:
       - lambda: |-
-          PoolPumpRS485::instance->setActuatorCurrent(x);
+          ValveActuator::instance->updateActuatorCurrent(x);
 
   - platform: wifi_signal
     name: "WiFi Signal dB"
