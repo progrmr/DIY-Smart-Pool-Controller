@@ -174,11 +174,6 @@ number:
     min_value: 0
     step: 10
     initial_value: 0
-    # the lambda below is also duplicated in the on_boot section above
-    # so that the pump speed request is restored after a reboot:
-    set_action:
-      - lambda: |-
-          PoolPumpRS485::instance->setPumpSpeed(lroundf(x));
 
 text_sensor:
   - platform: custom
@@ -189,7 +184,21 @@ text_sensor:
       App.register_component(vp);
       return {vp};
     text_sensors:
-      name: "Valve Position"
+      name: "Valve Position"  
+      on_value:
+        then:
+          - lambda: |-
+              auto position = x.c_str();
+              if (strcmp(position, "opening")==0 || strcmp(position, "opened")==0) {
+                id(pump_speed_request).publish_state(2701);
+                PoolPumpRS485::instance->setPumpSpeed(2701);
+              }
+              if (strcmp(position, "closing")==0 || strcmp(position, "closed")==0) {
+                id(pump_speed_request).publish_state(2401);
+                PoolPumpRS485::instance->setPumpSpeed(2401);
+              }
+              //##  NOT IMPLEMENTED YET but we need to set speed request to 0 after 60 seconds after 2401 is set
+              //## or find a better way to command pump speed
 
 sensor:
   - platform: custom

@@ -215,12 +215,14 @@ class PoolPumpRS485 : public Component, public UARTDevice {
       if (speed > MaxPumpSpeed) { speed = MaxPumpSpeed; }
       if (speed < MinPumpSpeed) { speed = MinPumpSpeed; }
       
-    if (speed == 2400) {
+      ESP_LOGD("custom","----- setPumpSpeed: %ld", speed);
+      
+    if (speed == 2401) {
       // request pump revert to normal programmed speed
       shouldRequestSolarSpeedOn  = false;
       shouldRequestSolarSpeedOff = true;
 
-    } else if (speed == 2700) {
+    } else if (speed == 2701) {
       // request pump switch to solar on speed
       shouldRequestSolarSpeedOn  = true;
       shouldRequestSolarSpeedOff = false;
