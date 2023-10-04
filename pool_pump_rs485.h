@@ -5,6 +5,8 @@
 #define PumpId 0x60
 #define CtlrId 0x10
 #define ReplyTimeOutMS 1000
+#define MinPumpSpeed 0
+#define MaxPumpSpeed 3000
 
 class PoolPumpRS485 : public Component, public UARTDevice {
  public:
@@ -13,7 +15,7 @@ class PoolPumpRS485 : public Component, public UARTDevice {
   typedef unsigned long MilliSec;
 
   Sensor* rpmSensor = new Sensor();		// pool pump RPM
-  Sensor* wattsSensor = new Sensor();		// pool pump power consumption
+  Sensor* wattsSensor = new Sensor();	// pool pump power consumption
 
   static PoolPumpRS485* instance;		// singleton instance
 
@@ -122,7 +124,7 @@ class PoolPumpRS485 : public Component, public UARTDevice {
 	           break;
 
 	         case requestStatus:
-	           handlePumpStatus(&msg);
+	           handlePumpStatusReply(&msg);
                    break;
                  
                  default:
@@ -210,6 +212,9 @@ class PoolPumpRS485 : public Component, public UARTDevice {
   //                 if needed, then set it to the desired RPM.
   //
   void setPumpSpeed(long speed) {
+      if (speed > MaxPumpSpeed) { speed = MaxPumpSpeed; }
+      if (speed < MinPumpSpeed) { speed = MinPumpSpeed; }
+      
     if (speed == 2400) {
       // request pump revert to normal programmed speed
       shouldRequestSolarSpeedOn  = false;
@@ -226,7 +231,6 @@ class PoolPumpRS485 : public Component, public UARTDevice {
       shouldRequestSolarSpeedOff = false;
     }
   }
-
 
   // 
   // isPumpPollingTime -- determines if we should send pump messages now
@@ -383,7 +387,7 @@ class PoolPumpRS485 : public Component, public UARTDevice {
     return msgValid;
   }
 
-  void handlePumpStatus(const Message* msg) {
+  void handlePumpStatusReply(const Message* msg) {
     //---------------------------
     // Save Pump RPM and Watts
     //---------------------------
