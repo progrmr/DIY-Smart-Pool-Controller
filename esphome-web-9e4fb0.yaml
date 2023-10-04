@@ -21,8 +21,8 @@ esphome:
           //---------------------
           auto rpmRequest = id(pump_speed_request);
           if (rpmRequest->state != NAN) {
-            ESP_LOGD("custom","===== BOOT: restoring pump RPM request state");
             long speed = lroundf(rpmRequest->state);
+            ESP_LOGD("custom","===== BOOT: restoring pump RPM request %l", speed);
             PoolPumpRS485::instance->setPumpSpeed(speed);
           }
       - lambda: |-
@@ -41,7 +41,7 @@ esphome:
           while (!WiFi.isConnected()) {
             delay(100);   // delay 100 ms
             notConnectedCounter++;
-            if(notConnectedCounter > 300) { // Reset board if not connected after 30s
+            if (notConnectedCounter > 300) {   // reset board if not connected after 30s
               ESP.restart();
             }
           }
@@ -87,6 +87,7 @@ time:
         hours: 0
         then:
           - lambda: |-
+              // at midnight, reset min/max to current temp
               float temp = id(water_temperature)->state;
               id(minimum_water_temperature)->publish_state(temp);
               id(maximum_water_temperature)->publish_state(temp);
@@ -117,30 +118,37 @@ switch:
     pin: GPIO22
     on_turn_on:
       then:
+        - lambda: |-
+            ValvePosition::instance->setValveDirectionRelayOn(true);
         - switch.turn_on: valve_power_relay
-        - delay: 35s
+        - delay: 30s
         - switch.turn_off: valve_power_relay
         - switch.turn_off: valve_direction_relay
-
+    on_turn_off:
+      then:
+        - lambda: |-
+            ValvePosition::instance->setValveDirectionRelayOn(false);
+        
   - platform: gpio
     name: "Valve Power Relay"
     id: valve_power_relay
     inverted: True
-    pin: GPIO23      
+    pin: GPIO23  
     on_turn_on:
       then:
         - lambda: |-
-            ValveActuator::instance->startMeasurements();
+            ValvePosition::instance->setValvePowerRelayOn(true);
         - repeat:
-            count: 32
+            count: 35
             then:
               - delay: 0.5s
               - component.update: valve_actuator_amps
               - delay: 0.5s
         - switch.turn_off: valve_power_relay
-        - switch.turn_off: valve_direction_relay
-        - delay: 0.5s
-        - component.update: valve_actuator_amps
+    on_turn_off:
+      then:
+        - lambda: |-
+            ValvePosition::instance->setValvePowerRelayOn(false);
 
 number:
   - platform: template
@@ -172,7 +180,46 @@ number:
       - lambda: |-
           PoolPumpRS485::instance->setPumpSpeed(lroundf(x));
 
+text_sensor:
+  - platform: custom
+    id: valve_position
+    lambda: |-
+      auto vp = new ValvePosition();
+      ValvePosition::instance = vp;
+      App.register_component(vp);
+      return {vp};
+    text_sensors:
+      name: "Valve Position"
+
 sensor:
+  - platform: custom
+    lambda: |-
+      auto pc = new PeakCurrent();
+      PeakCurrent::instance = pc;
+      App.register_component(pc);
+      return {pc};
+    sensors:
+      - name: "Peak Current"
+        id: peak_current
+        accuracy_decimals: 3
+        unit_of_measurement: A
+        device_class: "current"
+        state_class: "measurement"
+
+  - platform: custom
+    lambda: |-
+      auto at = new ActuationTime();
+      ActuationTime::instance = at;
+      App.register_component(at);
+      return {at};
+    sensors:
+      - name: "Actuation Time"
+        id: actuation_time
+        accuracy_decimals: 1
+        unit_of_measurement: s
+        device_class: "duration"
+        state_class: "measurement"
+
   - platform: custom
     id: pool_pump_rs485
     lambda: |-
@@ -192,27 +239,6 @@ sensor:
         device_class: "power"
         state_class: "measurement"
 
-  - platform: custom
-    id: valve_actuator
-    lambda: |-
-      auto va = new ValveActuator();
-      ValveActuator::instance = va;     // save singleton instance
-      App.register_component(va);
-      return {va->peakCurrentSensor, va->actuationTimeSensor};
-    sensors:
-      - name: "Peak Current"
-        id: peak_current
-        accuracy_decimals: 3
-        unit_of_measurement: A
-        device_class: "current"
-        state_class: "measurement"
-      - name: "Actuation Time"
-        id: actuation_time
-        accuracy_decimals: 0
-        unit_of_measurement: s
-        device_class: "duration"
-        state_class: "measurement"
-             
 # https://esphome.io/components/sensor/ntc
 # Solar Panel Thermistor sensor
   - platform: ntc
@@ -346,7 +372,7 @@ sensor:
       - multiply: 0.707
     on_value:
       - lambda: |-
-          ValveActuator::instance->updateActuatorCurrent(x);
+          ValvePosition::instance->setCurrent(x);
 
   - platform: wifi_signal
     name: "WiFi Signal dB"
