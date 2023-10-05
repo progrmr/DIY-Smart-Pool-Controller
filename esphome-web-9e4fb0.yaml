@@ -20,9 +20,9 @@ esphome:
           // are requesting a particular pump speed.  The C++ class gets
           // reinitialized when booting and we need to restore the speed.
           //---------------------
-          auto rpmRequest = id(pump_speed_request);
-          if (rpmRequest->state != NAN) {
-            long speed = lroundf(rpmRequest->state);
+          auto pumpSpeedRequest = id(pump_speed_request)->state;
+          if (!std::isnan(pumpSpeedRequest)) {
+            long speed = lroundf(pumpSpeedRequest);
             ESP_LOGD("custom","===== BOOT: restoring pump RPM request %l", speed);
             PoolPumpRS485::instance->setPumpSpeed(speed);
           }
@@ -381,12 +381,12 @@ sensor:
     on_value:
       lambda: |-
         auto minTemp = id(minimum_water_temperature);
-        if (x < minTemp->state || minTemp->state == NAN) {
+        if (x < minTemp->state || std::isnan(minTemp->state)) {
           // publish a new minimum water temperature
           minTemp->publish_state(x);
         }
         auto maxTemp = id(maximum_water_temperature);
-        if (x > maxTemp->state || minTemp->state == NAN) {
+        if (x > maxTemp->state || std::isnan(minTemp->state)) {
           // publish a new maximum water temperature
           maxTemp->publish_state(x);
         }
@@ -460,7 +460,7 @@ sensor:
     id: panel_thermistor_adc
     pin: GPIO33
     name: Panel Thermistor ADC
-    update_interval: 31s    
+    update_interval: 61s    
     attenuation: 11db
     filters:
       - offset: -0.02
@@ -470,7 +470,7 @@ sensor:
     id: water_thermistor_adc
     pin: GPIO32
     name: Water Thermistor ADC
-    update_interval: 30s    
+    update_interval: 59s    
     attenuation: 11db
     filters:
       - offset: -0.02
