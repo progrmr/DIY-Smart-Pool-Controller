@@ -76,12 +76,12 @@ wifi:
     gateway: 192.168.0.1
     subnet: 255.255.255.0
 
+#----------------------------------------------------------------------
+# TIME - used to reset min/max temp at midnight
 # https://esphome.io/components/time/index.html
+#----------------------------------------------------------------------
 time:
   - platform: sntp
-    on_time_sync: 
-      then:
-        - logger.log: "Pool Controller Time Synced"
     on_time:
       - seconds: 0
         minutes: 0
@@ -93,67 +93,25 @@ time:
               id(minimum_water_temperature)->publish_state(temp);
               id(maximum_water_temperature)->publish_state(temp);
 
+#----------------------------------------------------------------------
 # UART is used for RS-485 serial comm with the Pentair Pool Pump
 # the PoolPumpRS485 custom component class handles the actual
 # sending and receiving messages via the RS-485 serial port.
+#----------------------------------------------------------------------
 uart:
   id: pump_uart_bus
   tx_pin: GPIO14
   rx_pin: GPIO27
   baud_rate: 9600
 
-# The two relays are used to send 24 VAC power to the valve actuator:
-# 1. valve_direction_relay:
-#    * when ON turns the valve to send water through the solar panels,
-#    * when OFF valve turns back to normal (bypass solar) position
-# 2. valve_power_relay:
-#    * when ON provide 24 VAC power to the valve actuator, valve will
-#      not change direction or move at all unless this is on.
-# NOTE: valve actuation takes about 26 seconds to complete, 
-#       actuator current drops to 0 when it finishes moving
-switch:
-  - platform: gpio
-    name: "Valve Direction Relay"
-    id: valve_direction_relay
-    inverted: True
-    pin: GPIO22
-    on_turn_on:
-      then:
-        - lambda: |-
-            ValvePosition::instance->setValveDirectionRelayOn(true);
-        - switch.turn_on: valve_power_relay
-        - delay: 30s
-        - switch.turn_off: valve_power_relay
-        - switch.turn_off: valve_direction_relay
-    on_turn_off:
-      then:
-        - lambda: |-
-            ValvePosition::instance->setValveDirectionRelayOn(false);
-        
-  - platform: gpio
-    name: "Valve Power Relay"
-    id: valve_power_relay
-    inverted: True
-    pin: GPIO23  
-    on_turn_on:
-      then:
-        - lambda: |-
-            ValvePosition::instance->setValvePowerRelayOn(true);
-        - repeat:
-            count: 32
-            then:
-              - delay: 0.5s
-              - component.update: valve_actuator_amps
-              - delay: 0.5s
-        - switch.turn_off: valve_power_relay
-    on_turn_off:
-      then:
-        - lambda: |-
-            ValvePosition::instance->setValvePowerRelayOn(false);
-
+#----------------------------------------------------------------------
+# CURRENT LIMIT
+# Current Limit is used to detect problems with the valve actuator.  
+# Not Implemented Yet: when current exceeds this limit we should 
+# turn the valve actuator off and report an fault.
+# https://esphome.io/components/number/template
+#----------------------------------------------------------------------
 number:
-# Current Limit is used to detect problems with the valve actuator.  When
-# actual current exceeds this limit we should turn it off and report an fault.
   - platform: template
     name: "Current Limit"
     id: current_limit
@@ -167,9 +125,20 @@ number:
     ## NOT IMPLEMENTED YET ##
     # need to do something with the limit, when actual exceeds limit
 
-# Pump Speed Request is a temporary solution to commanding the pump to a particular
-# RPM when the solar valve is on, the higher RPM is needed to efficiently circulate
-# water through the solar panels on the roof.
+#----------------------------------------------------------------------
+# PUMP SPEED REQUEST
+# This is a temporary solution to commanding the pump toa higher RPM
+# when the solar valve is on, the higher RPM is needed to efficiently 
+# circulate water through the solar panels on the roof.  The RPM is 
+# set in the pump itself in one of the external programs put in via
+# the pump's keypad.  See pump's user manual for details.
+#
+# 1. Set speed 2701 to command external program which runs at 2700 RPM
+# 2. Set speed 2401 to command NOT using external program (reverts to normal)
+# 3. Set speed to any other value to stop sending commands (pump reverts to normal after ~60 sec)
+#
+# https://esphome.io/components/number/template
+#----------------------------------------------------------------------
   - platform: template
     name: "Pump Speed Request"
     id: pump_speed_request
@@ -186,6 +155,13 @@ number:
       - lambda: |-
           PoolPumpRS485::instance->setPumpSpeed(lroundf(x));
 
+#----------------------------------------------------------------------
+# POOL TARGET TEMPERATURE
+# This is for display so the pool users can set their desired pool
+# water temperature.  It is used by the solar controller to decide
+# how long to run the solar heat and get to this target.
+# https://esphome.io/components/number/template
+#----------------------------------------------------------------------
   - platform: template
     name: "Pool Target Temperature"
     id: pool_target_temp
@@ -199,10 +175,16 @@ number:
     step: 1
     initial_value: 86.6
 
+#----------------------------------------------------------------------
+# VALVE POSITION (SOLAR)
+#
+# Valve Position can be:  unknown, opening, closing, opened, closed
+# It is initially unknown, but changes based on the relay states etc.
+# It is set inside the ValvePosition class.
+#
+# https://esphome.io/components/text_sensor/custom.html
+#----------------------------------------------------------------------
 text_sensor:
-  # Valve Position can be:  unknown, opening, closing, opened, closed
-  # It is initially unknown, but changes based on the relay states etc.
-  # It is set inside the ValvePosition class.
   - platform: custom
     lambda: |-
       auto vp = new ValvePosition();
@@ -214,6 +196,7 @@ text_sensor:
       id: valve_position
       on_value:
         then:
+          - lambda: 'SolarController::instance->setValvePosition(x);'
           - if:
               condition:
                 or:
@@ -224,7 +207,6 @@ text_sensor:
                       id: valve_position
                       state: "opening"
               then:
-                - lambda: 'SolarController::instance->recordValvePositionChangeTime();'
                 - number.set:
                     id: pump_speed_request
                     value: 2701
@@ -238,7 +220,6 @@ text_sensor:
                       id: valve_position
                       state: "closing"
               then:
-                - lambda: 'SolarController::instance->recordValvePositionChangeTime();'
                 - number.set:
                     id: pump_speed_request
                     value: 2401
@@ -247,6 +228,20 @@ text_sensor:
                     id: pump_speed_request
                     value: 111
 
+#----------------------------------------------------------------------
+# SOLAR CONTROLLER
+#
+# Determines if we should be running water through the solar panels.
+# The binary output is true if we should be using solar.  It checks
+# conditions periodically and updates its decision.  It decides based
+# on water temp, panel temp, target temp, pump RPM, and 
+# time since last valve position change.  It is designed to have
+# hysteresis so that the valve position is not changing back and forth
+# every couple minutes, which would wear it out.  For example: it will
+# hold its current binary state if the valve position has changed  
+# within past 5 minutes.
+# https://esphome.io/components/binary_sensor/custom.html
+#----------------------------------------------------------------------
 binary_sensor:
   - platform: custom
     lambda: |-
@@ -258,13 +253,16 @@ binary_sensor:
       - name: "Use Solar Heat"
         id: use_solar_heat
         on_press:
-          lambda: 'ESP_LOGD("custom","----- Use Solar Heat in ON");'
+          lambda: 'ESP_LOGD("custom","----- Use Solar Heat -- ON");'
         on_release:
-          lambda: 'ESP_LOGD("custom","----- Use Solar Heat in OFF");'
+          lambda: 'ESP_LOGD("custom","----- Use Solar Heat -- OFF");'
 
+#----------------------------------------------------------------------
+# PEAK CURRENT - keeps track of the valve actuator's peak currant usage
+# measured in amps. This is for diagnostic purposes.
+# https://esphome.io/components/sensor/custom.html
+#----------------------------------------------------------------------
 sensor:
-  # Peak Current keeps track of the valve actuator's peak currant usage.   
-  # This is for future diagnostic purposes and problem solving.
   - platform: custom
     lambda: |-
       auto pc = new PeakCurrent();
@@ -279,8 +277,17 @@ sensor:
         device_class: "current"
         state_class: "measurement"
 
-  # Actuator Time measures how long it takes for the valve actuator to complete
-  # its actuation from open to closed or closed to open.  This is for future diagnostics.
+#----------------------------------------------------------------------
+# ACTUATOR TIME
+#
+# Measures how long it takes for the valve actuator to 
+# complete its actuation from open to closed or closed to open.  
+# This is for diagnostic purposes.  Taking less than ~26 seconds means
+# the valve wasn't fully open/closed, taking longer could mean there
+# is a problem with turning the valve.  See also actuator current.
+#
+# https://esphome.io/components/sensor/custom.html
+#----------------------------------------------------------------------
   - platform: custom
     lambda: |-
       auto at = new ActuationTime();
@@ -295,10 +302,22 @@ sensor:
         device_class: "duration"
         state_class: "measurement"
 
-  # Pool Pump RS485 handles serial communications with the pump.  Getting the pump status
-  # and telling the pump when to speed up or slow down for solar heating.  Pump status 
-  # messages have RPM and Wattage usage which appear in sensors here.  RPM is used to
-  # determine when the pump is actually running.  Wattage is for diagnostic/info only.
+#----------------------------------------------------------------------
+# POOL PUMP RS-485 COMM
+#
+# This custom C++ class handles serial communications with the pump.  
+# Gets the pump status and tells it when to speed up or slow down for 
+# solar heating.  Status messages have RPM and Wattage usage which appear 
+# in sensors here.  RPM is used to determine when the pump is actually 
+# running.  Wattage is for diagnostic/info only.
+#
+# This class automatically polls the pump for status every 15 seconds.  
+# It can also sends commands to set pump speed every 15 seconds. The
+# pump reverts to preprogrammed schedule or speed if we stop sending
+# the speed commands for longer than 30 seconds or so.
+# 
+# https://esphome.io/components/sensor/custom.html
+#----------------------------------------------------------------------
   - platform: custom
     lambda: |-
       auto myPoolPump = new PoolPumpRS485(id(pump_uart_bus));
@@ -319,9 +338,13 @@ sensor:
         device_class: "power"
         state_class: "measurement"
 
+#----------------------------------------------------------------------
+# SOLAR PANEL TEMPERATURE
+#
+# Solar Panel Thermistor sensor is located on the roof solar panels and
+# is used to determine if it is hot enough to heat the pool water.
 # https://esphome.io/components/sensor/ntc
-# Solar Panel Thermistor sensor - this thermistor is located on the roof solar panels and
-# is used to determine if there is enough sun/heat to heat the pool water.
+#----------------------------------------------------------------------
   - platform: ntc
     name: Panel Temperature
     id: panel_temperature
@@ -332,6 +355,43 @@ sensor:
       - 3602Ohm -> 50°C
     filters:
       - offset: 0.6
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 5
+
+#----------------------------------------------------------------------
+# WATER TEMPERATURE NTC
+#
+# Water Temperature NTC sensor is located in a pipe right next to the pump
+# output and it used to measure pool water temperature.  This temperature 
+# reading is NOT valid if the pump is off since water is not flowing 
+# through the pipe and can cool off or heat up while sitting in the pipe.
+# Better to use skimmer water temperature if pump is not running.
+# This temperature is used to update the min/max temperatures above.
+# https://esphome.io/components/sensor/ntc
+#----------------------------------------------------------------------
+  - platform: ntc
+    name: Water Temperature
+    id: water_temperature
+    sensor: water_thermistor
+    calibration:
+      - 15310Ohm -> 16°C
+      - 10000Ohm -> 25°C
+      - 3602Ohm -> 50°C
+    on_value:
+      lambda: |-
+        auto minTemp = id(minimum_water_temperature);
+        if (x < minTemp->state || minTemp->state == NAN) {
+          // publish a new minimum water temperature
+          minTemp->publish_state(x);
+        }
+        auto maxTemp = id(maximum_water_temperature);
+        if (x > maxTemp->state || minTemp->state == NAN) {
+          // publish a new maximum water temperature
+          maxTemp->publish_state(x);
+        }
+    filters:
+      - offset: 0.11
       - sliding_window_moving_average:
           window_size: 5
           send_every: 5
@@ -347,7 +407,7 @@ sensor:
     accuracy_decimals: 1
     # NOTE: updates are done elsewhere:
     # (1) midnight (resets min from current) in the time sntp above, 
-    # (2) whenever the water_temperature sensor below updates.
+    # (2) whenever the water_temperature sensor updates.
     update_interval: never
 
   - platform: template
@@ -359,38 +419,17 @@ sensor:
     accuracy_decimals: 1
     # NOTE: updates are done elsewhere:
     # (1) midnight (resets min from current) in the time sntp above, 
-    # (2) whenever the water_temperature sensor below updates.
+    # (2) whenever the water_temperature sensor updates.
     update_interval: never
 
-# Water Temperature Thermistor sensor is located in a pipe right next to the pump
-# output and it used to measure pool water temperature.  This temperature reading
-# is NOT valid if the pump is off since water is not flowing through the pipe then.
-# This temperature is used to update the min/max temperatures above.
-  - platform: ntc
-    name: Water Temperature
-    id: water_temperature
-    sensor: water_thermistor
-    calibration:
-      - 15310Ohm -> 16°C
-      - 10000Ohm -> 25°C
-      - 3602Ohm -> 50°C
-    on_value:
-      lambda: |-
-        auto minTemp = id(minimum_water_temperature);
-        if (x < minTemp->state || minTemp->state == NAN) {
-          minTemp->publish_state(x);
-        }
-        auto maxTemp = id(maximum_water_temperature);
-        if (x > maxTemp->state || minTemp->state == NAN) {
-          maxTemp->publish_state(x);
-        }
-    filters:
-      - offset: 0.11
-      - sliding_window_moving_average:
-          window_size: 5
-          send_every: 5
-
+#----------------------------------------------------------------------
+# RESISTANCE SENSORS for thermistor's voltage dividors
+#
+# Uses the ADC voltage reading to compute resistance value of the 
+# corresponding thermistors.  This value is used above to compute
+# a temperature reading from the thermistors.
 # https://esphome.io/components/sensor/resistance
+#----------------------------------------------------------------------
   - platform: resistance
     internal: True
     id: panel_thermistor
@@ -409,7 +448,13 @@ sensor:
     name: Water Resistance Sensor
     reference_voltage: 3.3V
 
+#----------------------------------------------------------------------
+# ADC SENSORS FOR THERMISTORS
+#
+# Uses the ADC to measure voltage across thermister voltage dividers.
+# One to measure water temperature and one for solar panel temp.
 # https://esphome.io/components/sensor/adc
+#----------------------------------------------------------------------
   - platform: adc
     internal: True
     id: panel_thermistor_adc
@@ -430,12 +475,17 @@ sensor:
     filters:
       - offset: -0.02
 
-# Valve Actuator Current sensor measures peak voltage across a shunt
+#----------------------------------------------------------------------
+# VALVE ACTUATOR CURRENT SENSOR
+#
+# The Valve Actuator Current sensor measures peak voltage across a shunt
 # resistor (1 ohm) from an AC sine wave (after half wave rectifier), 
-# We measure peak voltage(amps) with help of a 10uF capacitor after the
+# We measure peak voltage(amps) by charging a 10uF capacitor after the
 # rectifier which holds at the peak voltage.  There is a 22k resistor
 # on the capacitor so that the voltage reading will decay when
-# the actual current drops.
+# the actual current drops.  See schematic and design manual for details.
+# https://esphome.io/components/sensor/adc
+#----------------------------------------------------------------------
   - platform: adc
     pin: GPIO36
     name: "Valve Actuator Current"
@@ -464,3 +514,66 @@ sensor:
     entity_category: "diagnostic"
     update_interval: 120s
   
+#----------------------------------------------------------------------
+# The two relays are used to send 24 VAC power to the valve actuator.
+#
+# You only need to turn on one of the relays in order to open or close
+# the valve. The automations below handle the details including turning
+# the relays off when done.
+#   1. Turn on the valve_direction_relay to open the valve.
+#   2. Turn on the valve_power_relay to close the valve.
+#
+# VALVE POWER RELAY:
+#    * when ON provide 24 VAC power to the valve actuator, valve will
+#      not change direction or move at all unless this is on.
+#
+# VALVE DIRECTION RELAY:
+#    * when ON turns the valve to send water through the solar panels,
+#    * when OFF valve turns back to normal (bypass solar) position
+#
+# NOTE: valve actuation takes about 26 seconds to complete, 
+#       actuator current drops to 0 when it finishes moving
+#
+# https://esphome.io/components/switch/gpio.html
+# https://devices.esphome.io/devices/Generic-Relay
+#----------------------------------------------------------------------
+switch:
+  - platform: gpio
+    name: "Valve Power Relay"
+    id: valve_power_relay
+    inverted: True
+    pin: GPIO23  
+    on_turn_on:
+      then:
+        - lambda: |-
+            ValvePosition::instance->setValvePowerRelayOn(true);
+        - repeat:
+            count: 32
+            then:
+              - delay: 0.5s
+              - component.update: valve_actuator_amps
+              - delay: 0.5s
+        - switch.turn_off: valve_power_relay
+    on_turn_off:
+      then:
+        - lambda: |-
+            ValvePosition::instance->setValvePowerRelayOn(false);
+
+  - platform: gpio
+    name: "Valve Direction Relay"
+    id: valve_direction_relay
+    inverted: True
+    pin: GPIO22
+    on_turn_on:
+      then:
+        - lambda: |-
+            ValvePosition::instance->setValveDirectionRelayOn(true);
+        - switch.turn_on: valve_power_relay
+        - delay: 30s
+        - switch.turn_off: valve_power_relay
+        - switch.turn_off: valve_direction_relay
+    on_turn_off:
+      then:
+        - lambda: |-
+            ValvePosition::instance->setValveDirectionRelayOn(false);
+        

@@ -8,7 +8,8 @@ class SolarController : public PollingComponent, public BinarySensor {
     SolarController() : PollingComponent(30000) {}      // poll every 30 sec
     
     unsigned long msValvePositionChanged = 0;   // millis() time of last valve position change
-    
+    std::string valvePosition;
+
     enum SolarHeatStates {
         unknown,
         solarDisabled,
@@ -73,9 +74,12 @@ class SolarController : public PollingComponent, public BinarySensor {
         }
     }
     
-    void recordValvePositionChangeTime() {
-        msValvePositionChanged = millis();
-        ESP_LOGD("custom","----- valve position changed at: %lu ms", msValvePositionChanged);
+    void setValvePosition(std::string newPosition) {
+        if (valvePosition != newPosition) {
+            ESP_LOGD("custom","----- valve position changed to: %s (was %s)", newPosition.c_str(), valvePosition.c_str());
+            valvePosition = newPosition;
+            msValvePositionChanged = millis();
+        }
     }
     
     float CtoF(float centigrade) {
