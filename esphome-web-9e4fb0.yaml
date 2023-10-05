@@ -7,12 +7,13 @@ esphome:
   name: ${devicename}
   friendly_name: ${friendly_devicename}
   includes:
-    - pool_pump_rs485.h
+    - solar_controller.h
     - valve_actuator.h
+    - pool_pump_rs485.h
   on_boot:
     priority: -10
     then:
-      - delay: 30s
+      - delay: 10s
       - lambda: |-
           //---------------------
           // need to call setPumpSpeed after reboot in case we
@@ -25,23 +26,26 @@ esphome:
             ESP_LOGD("custom","===== BOOT: restoring pump RPM request %l", speed);
             PoolPumpRS485::instance->setPumpSpeed(speed);
           }
+      - delay: 5s
       - lambda: |-
           //---------------------
           // need to init various sensors, they don't get
           // restored after a reboot
           //---------------------
+          ESP_LOGD("custom","===== BOOT: restoring min/max water temps, amps/peak");
           float curTemp = id(water_temperature).state;
           id(minimum_water_temperature)->publish_state(curTemp);
           id(maximum_water_temperature)->publish_state(curTemp);
           id(valve_actuator_amps)->publish_state(0);
           id(peak_current)->publish_state(0);
           id(actuation_time)->publish_state(0);
+      - delay: 5s
       - lambda: |-
-          uint32_t notConnectedCounter = 0;
+          uint32_t notConnectedCount = 0;
           while (!WiFi.isConnected()) {
             delay(100);   // delay 100 ms
-            notConnectedCounter++;
-            if (notConnectedCounter > 300) {   // reset board if not connected after 30s
+            notConnectedCount++;
+            if (notConnectedCount > 300) {   // reset board if not connected after 30s
               ESP.restart();
             }
           }
@@ -61,11 +65,8 @@ api:
 
 ota:
 
-
 wifi:
   networks:
-  - ssid: !secret patio_wifi_ssid
-    password: !secret patio_wifi_password
   - ssid: !secret wifi_ssid
     password: !secret wifi_password
 
@@ -104,7 +105,7 @@ uart:
 # The two relays are used to send 24 VAC power to the valve actuator:
 # 1. valve_direction_relay:
 #    * when ON turns the valve to send water through the solar panels,
-#    * when OFF valve turns back to normal bypass solar position
+#    * when OFF valve turns back to normal (bypass solar) position
 # 2. valve_power_relay:
 #    * when ON provide 24 VAC power to the valve actuator, valve will
 #      not change direction or move at all unless this is on.
@@ -139,7 +140,7 @@ switch:
         - lambda: |-
             ValvePosition::instance->setValvePowerRelayOn(true);
         - repeat:
-            count: 35
+            count: 32
             then:
               - delay: 0.5s
               - component.update: valve_actuator_amps
@@ -151,6 +152,8 @@ switch:
             ValvePosition::instance->setValvePowerRelayOn(false);
 
 number:
+# Current Limit is used to detect problems with the valve actuator.  When
+# actual current exceeds this limit we should turn it off and report an fault.
   - platform: template
     name: "Current Limit"
     id: current_limit
@@ -160,9 +163,13 @@ number:
     min_value: 0.1
     step: 0.1
     initial_value: 0.6
+    device_class: "current"
     ## NOT IMPLEMENTED YET ##
     # need to do something with the limit, when actual exceeds limit
 
+# Pump Speed Request is a temporary solution to commanding the pump to a particular
+# RPM when the solar valve is on, the higher RPM is needed to efficiently circulate
+# water through the solar panels on the roof.
   - platform: template
     name: "Pump Speed Request"
     id: pump_speed_request
@@ -170,14 +177,33 @@ number:
     restore_value: True
     unit_of_measurement: RPM
     device_class: speed
+    mode: box
     max_value: 4000
     min_value: 0
     step: 10
     initial_value: 0
+    set_action:
+      - lambda: |-
+          PoolPumpRS485::instance->setPumpSpeed(lroundf(x));
+
+  - platform: template
+    name: "Pool Target Temperature"
+    id: pool_target_temp
+    optimistic: True
+    restore_value: True
+    unit_of_measurement: "°F"
+    device_class: temperature
+    mode: box
+    min_value: 50
+    max_value: 105
+    step: 1
+    initial_value: 86.6
 
 text_sensor:
+  # Valve Position can be:  unknown, opening, closing, opened, closed
+  # It is initially unknown, but changes based on the relay states etc.
+  # It is set inside the ValvePosition class.
   - platform: custom
-    id: valve_position
     lambda: |-
       auto vp = new ValvePosition();
       ValvePosition::instance = vp;
@@ -185,22 +211,60 @@ text_sensor:
       return {vp};
     text_sensors:
       name: "Valve Position"  
+      id: valve_position
       on_value:
         then:
-          - lambda: |-
-              auto position = x.c_str();
-              if (strcmp(position, "opening")==0 || strcmp(position, "opened")==0) {
-                id(pump_speed_request).publish_state(2701);
-                PoolPumpRS485::instance->setPumpSpeed(2701);
-              }
-              if (strcmp(position, "closing")==0 || strcmp(position, "closed")==0) {
-                id(pump_speed_request).publish_state(2401);
-                PoolPumpRS485::instance->setPumpSpeed(2401);
-              }
-              //##  NOT IMPLEMENTED YET but we need to set speed request to 0 after 60 seconds after 2401 is set
-              //## or find a better way to command pump speed
+          - if:
+              condition:
+                or:
+                  - text_sensor.state:
+                      id: valve_position
+                      state: "opened"
+                  - text_sensor.state:
+                      id: valve_position
+                      state: "opening"
+              then:
+                - lambda: 'SolarController::instance->recordValvePositionChangeTime();'
+                - number.set:
+                    id: pump_speed_request
+                    value: 2701
+          - if:
+              condition:
+                or:
+                  - text_sensor.state:
+                      id: valve_position
+                      state: "closed"
+                  - text_sensor.state:
+                      id: valve_position
+                      state: "closing"
+              then:
+                - lambda: 'SolarController::instance->recordValvePositionChangeTime();'
+                - number.set:
+                    id: pump_speed_request
+                    value: 2401
+                - delay: 60s
+                - number.set: 
+                    id: pump_speed_request
+                    value: 111
+
+binary_sensor:
+  - platform: custom
+    lambda: |-
+      auto sc = new SolarController();
+      SolarController::instance = sc;
+      App.register_component(sc);
+      return {sc};
+    binary_sensors:
+      - name: "Use Solar Heat"
+        id: use_solar_heat
+        on_press:
+          lambda: 'ESP_LOGD("custom","----- Use Solar Heat in ON");'
+        on_release:
+          lambda: 'ESP_LOGD("custom","----- Use Solar Heat in OFF");'
 
 sensor:
+  # Peak Current keeps track of the valve actuator's peak currant usage.   
+  # This is for future diagnostic purposes and problem solving.
   - platform: custom
     lambda: |-
       auto pc = new PeakCurrent();
@@ -215,6 +279,8 @@ sensor:
         device_class: "current"
         state_class: "measurement"
 
+  # Actuator Time measures how long it takes for the valve actuator to complete
+  # its actuation from open to closed or closed to open.  This is for future diagnostics.
   - platform: custom
     lambda: |-
       auto at = new ActuationTime();
@@ -229,8 +295,11 @@ sensor:
         device_class: "duration"
         state_class: "measurement"
 
+  # Pool Pump RS485 handles serial communications with the pump.  Getting the pump status
+  # and telling the pump when to speed up or slow down for solar heating.  Pump status 
+  # messages have RPM and Wattage usage which appear in sensors here.  RPM is used to
+  # determine when the pump is actually running.  Wattage is for diagnostic/info only.
   - platform: custom
-    id: pool_pump_rs485
     lambda: |-
       auto myPoolPump = new PoolPumpRS485(id(pump_uart_bus));
       PoolPumpRS485::instance = myPoolPump;   // save singleton instance
@@ -239,17 +308,20 @@ sensor:
               myPoolPump->wattsSensor}; 
     sensors:
       - name: "RPM Sensor"
+        id: pump_rpm_sensor
         unit_of_measurement: RPM
         device_class: "speed"
         state_class: "measurement"
       - name: "Watts Sensor"
+        id: pump_watts_sensor
         accuracy_decimals: 0
         unit_of_measurement: W
         device_class: "power"
         state_class: "measurement"
 
 # https://esphome.io/components/sensor/ntc
-# Solar Panel Thermistor sensor
+# Solar Panel Thermistor sensor - this thermistor is located on the roof solar panels and
+# is used to determine if there is enough sun/heat to heat the pool water.
   - platform: ntc
     name: Panel Temperature
     id: panel_temperature
@@ -290,7 +362,10 @@ sensor:
     # (2) whenever the water_temperature sensor below updates.
     update_interval: never
 
-# Water Temperature Thermistor sensor
+# Water Temperature Thermistor sensor is located in a pipe right next to the pump
+# output and it used to measure pool water temperature.  This temperature reading
+# is NOT valid if the pump is off since water is not flowing through the pipe then.
+# This temperature is used to update the min/max temperatures above.
   - platform: ntc
     name: Water Temperature
     id: water_temperature
