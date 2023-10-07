@@ -515,6 +515,7 @@ sensor:
           if (x < 0.15) { return 0.0; } else { return x; }     
 # NOTE: multiply by 0.707 to convert peak amps reading to RMS amps value
       - multiply: 0.707
+      - offset: 0.095   # calibrated 10/7/2023
     on_value:
       - lambda: |-
           ValvePosition::instance->setCurrent(x);
