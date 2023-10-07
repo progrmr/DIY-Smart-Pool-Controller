@@ -170,6 +170,7 @@ class PoolPumpRS485 : public Component, public UARTDevice {
        case sendSolarSpeedOff:
          if (shouldRequestSolarSpeedOff) {
            // transmit a request for pump to switch off solar speed
+             ESP_LOGD("custom","vvvvv -- send pump msg: revert to NORMAL SPEED.");
            sendMessage(pumpSolarSpeedOff, sizeof(pumpSolarSpeedOff));
            msgSequenceState = waitSolarSpeedOff;
            msgState = expectStart;
@@ -207,50 +208,58 @@ class PoolPumpRS485 : public Component, public UARTDevice {
     }
   }
 
-  //
-  // setPumpSpeed -- needs to check if the pump is running, turn it on
-  //                 if needed, then set it to the desired RPM.
-  //
-  void setPumpSpeed(long speed) {
-      if (speed > MaxPumpSpeed) { speed = MaxPumpSpeed; }
-      if (speed < MinPumpSpeed) { speed = MinPumpSpeed; }
-      
-      ESP_LOGD("custom","----- setPumpSpeed: %ld", speed);
-      
-    if (speed == 2401) {
-      // request pump revert to normal programmed speed
-      shouldRequestSolarSpeedOn  = false;
-      shouldRequestSolarSpeedOff = true;
-
-    } else if (speed == 2701) {
-      // request pump switch to solar on speed
-      shouldRequestSolarSpeedOn  = true;
-      shouldRequestSolarSpeedOff = false;
-
-    } else {
-      // no requests, stop sending these messages
-      shouldRequestSolarSpeedOn  = false;
-      shouldRequestSolarSpeedOff = false;
+    //
+    // setPumpSpeed -- needs to check if the pump is running, turn it on
+    //                 if needed, then set it to the desired RPM.
+    //
+    void setPumpSpeed(long speed) {
+        if (speed > MaxPumpSpeed) { speed = MaxPumpSpeed; }
+        if (speed < MinPumpSpeed) { speed = MinPumpSpeed; }
+        
+        ESP_LOGD("custom","----- setPumpSpeed: %ld", speed);
+        
+        shouldRequestSolarSpeedOn  = (speed == 2701);
+        shouldRequestSolarSpeedOff = (speed == 2401);
+        
+        if (shouldRequestSolarSpeedOn || shouldRequestSolarSpeedOff) {
+            // adjust last pump poll time so that next poll occurs in 1 second
+            setNextPollToHappenIn(1000);        // 1 sec in future
+        }
     }
-  }
 
-  // 
-  // isPumpPollingTime -- determines if we should send pump messages now
-  //
-  const bool isPumpPollingTime() {
-    const unsigned long msElapsed = millis() - msLastPumpPoll;
+    // 
+    // isPumpPollingTime -- determines if we should send pump messages now
+    //
+    const bool isPumpPollingTime() {
+        const MilliSec msElapsed = millis() - msLastPumpPoll;
+        
+        return msElapsed >= PumpPollIntervalMS;
+    }
 
-    return msElapsed >= PumpPollIntervalMS;
-  }
-
-  //
-  // sendMessage -- send message via RS-485 serial to the pump
-  //
-  const void sendMessage(const uint8_t* message, const size_t length) {
-    write_array(msgHeader, sizeof(msgHeader));
-    write_array(msgDestination, sizeof(msgDestination));
-    write_array(message, length);
-  }
+    //
+    // setNextPollToHappenIn -- fix polling to happen next in durationMS
+    // if time to the next poll less than duration, no change made
+    //
+    void setNextPollToHappenIn(MilliSec duration) {
+        MilliSec now = millis();
+        MilliSec msUntilNextPoll = (msLastPumpPoll + PumpPollIntervalMS) - now;
+        if (msUntilNextPoll <= duration) {
+            return;     // it's going to happen soon anyway, leave it alone
+        }
+        
+        ESP_LOGD("custom","+++++ setNextPollToHappenIn: %0.3fs", duration/1000.0);
+        MilliSec msAtDesiredNextPoll = now + duration;
+        msLastPumpPoll = msAtDesiredNextPoll - PumpPollIntervalMS;
+    }
+    
+    //
+    // sendMessage -- send message via RS-485 serial to the pump
+    //
+    const void sendMessage(const uint8_t* message, const size_t length) {
+        write_array(msgHeader, sizeof(msgHeader));
+        write_array(msgDestination, sizeof(msgDestination));
+        write_array(message, length);
+    }
 
   //
   // gotMessageByte -- updates received message data according to state

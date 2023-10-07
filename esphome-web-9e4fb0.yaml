@@ -197,36 +197,6 @@ text_sensor:
       on_value:
         then:
           - lambda: 'SolarController::instance->setValvePosition(x);'
-          - if:
-              condition:
-                or:
-                  - text_sensor.state:
-                      id: valve_position
-                      state: "opened"
-                  - text_sensor.state:
-                      id: valve_position
-                      state: "opening"
-              then:
-                - number.set:
-                    id: pump_speed_request
-                    value: 2701
-          - if:
-              condition:
-                or:
-                  - text_sensor.state:
-                      id: valve_position
-                      state: "closed"
-                  - text_sensor.state:
-                      id: valve_position
-                      state: "closing"
-              then:
-                - number.set:
-                    id: pump_speed_request
-                    value: 2401
-                - delay: 60s
-                - number.set: 
-                    id: pump_speed_request
-                    value: 111
 
 #----------------------------------------------------------------------
 # SOLAR CONTROLLER
@@ -253,9 +223,30 @@ binary_sensor:
       - name: "Use Solar Heat"
         id: use_solar_heat
         on_press:
-          lambda: 'ESP_LOGD("custom","----- Use Solar Heat -- ON");'
+          - lambda: 'ESP_LOGD("custom","^^^^^^^^^^^^^^^ Solar Heat ON ^^^^^^^^^^^^^^^");'
+          # bring pump to to speed, wait a bit, then turn valve to solar
+          - number.set:
+              id: pump_speed_request
+              value: 2701
+          - delay: 30s
+          # set valve to the solar (open) position
+          # valve_direction_relay on, opens the valve
+          - switch.turn_on: valve_direction_relay
         on_release:
-          lambda: 'ESP_LOGD("custom","----- Use Solar Heat -- OFF");'
+          - lambda: 'ESP_LOGD("custom","vvvvvvvvvvvvvvv Solar Heat OFF vvvvvvvvvvvvvvv");'
+          # set pump back to normal speed
+          - number.set:
+              id: pump_speed_request
+              value: 2401
+          - delay: 30s
+          # set valve back to normal (closed) position
+          # valve_power_relay on, with valve_direction_relay off, closes the valve
+          - switch.turn_off: valve_direction_relay
+          - switch.turn_on: valve_power_relay
+          - delay: 30s
+          - number.set: 
+              id: pump_speed_request
+              value: 999 
 
 #----------------------------------------------------------------------
 # PEAK CURRENT - keeps track of the valve actuator's peak currant usage
@@ -514,6 +505,10 @@ sensor:
     entity_category: "diagnostic"
     update_interval: 120s
   
+  - platform: internal_temperature
+    name: "Internal Temperature"
+    entity_category: "diagnostic"
+
 #----------------------------------------------------------------------
 # The two relays are used to send 24 VAC power to the valve actuator.
 #
