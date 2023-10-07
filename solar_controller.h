@@ -50,7 +50,7 @@ class SolarController : public PollingComponent, public BinarySensor {
         if (elapsed < MINIMUM_CHANGE_INTERVAL*1000) {
             // it has not been long enough, no change allowed
             ESP_LOGD("custom","----- SOLAR: NO CHANGE (%0.0f sec elapsed, need %0.0f)", 
-                     elapsed/1000.0, MINIMUM_CHANGE_INTERVAL);
+                     elapsed/1000.0, float(MINIMUM_CHANGE_INTERVAL));
             return solarHeatState;        // keep current state
         }
         
