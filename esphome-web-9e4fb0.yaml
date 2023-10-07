@@ -123,7 +123,7 @@ number:
     initial_value: 0.6
     device_class: "current"
     ## NOT IMPLEMENTED YET ##
-    # need to do something with the limit, when actual exceeds limit
+    # need to do something with the limit, when actual current exceeds limit
 
 #----------------------------------------------------------------------
 # PUMP SPEED REQUEST
@@ -170,10 +170,30 @@ number:
     unit_of_measurement: "°F"
     device_class: temperature
     mode: box
-    min_value: 50
-    max_value: 105
+    min_value: 60
+    max_value: 95
     step: 1
     initial_value: 86.6
+
+#----------------------------------------------------------------------
+# SPA TARGET TEMPERATURE
+# This is for display so the spa users can set their desired spa
+# water temperature.  It is used by the solar controller to decide
+# how long to run the solar heat and get to this target.
+# https://esphome.io/components/number/template
+#----------------------------------------------------------------------
+  - platform: template
+    name: "Spa Target Temperature"
+    id: spa_target_temp
+    optimistic: True
+    restore_value: True
+    unit_of_measurement: "°F"
+    device_class: temperature
+    mode: box
+    min_value: 90
+    max_value: 105
+    step: 1
+    initial_value: 100
 
 #----------------------------------------------------------------------
 # VALVE POSITION (SOLAR)
@@ -572,3 +592,8 @@ switch:
         - lambda: |-
             ValvePosition::instance->setValveDirectionRelayOn(false);
         
+  - platform: template
+    name: "Spa Mode"
+    id: spa_mode
+    optimistic: True
+    
