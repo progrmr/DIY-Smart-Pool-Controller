@@ -77,23 +77,6 @@ wifi:
     subnet: 255.255.255.0
 
 #----------------------------------------------------------------------
-# TIME - used to reset min/max temp at midnight
-# https://esphome.io/components/time/index.html
-#----------------------------------------------------------------------
-time:
-  - platform: sntp
-    on_time:
-      - seconds: 0
-        minutes: 0
-        hours: 0
-        then:
-          - lambda: |-
-              // at midnight, reset min/max to current temp
-              float temp = id(water_temperature)->state;
-              id(minimum_water_temperature)->publish_state(temp);
-              id(maximum_water_temperature)->publish_state(temp);
-
-#----------------------------------------------------------------------
 # UART is used for RS-485 serial comm with the Pentair Pool Pump
 # the PoolPumpRS485 custom component class handles the actual
 # sending and receiving messages via the RS-485 serial port.
@@ -120,10 +103,11 @@ number:
     max_value: 2.0
     min_value: 0.1
     step: 0.1
-    initial_value: 0.6
+    initial_value: 0.7
     device_class: "current"
-    ## NOT IMPLEMENTED YET ##
+    mode: box
     # need to do something with the limit, when actual current exceeds limit
+    ## NOT IMPLEMENTED YET ##
 
 #----------------------------------------------------------------------
 # PUMP SPEED REQUEST
@@ -311,7 +295,7 @@ sensor:
         accuracy_decimals: 1
         unit_of_measurement: s
         device_class: "duration"
-        state_class: "measurement"
+        state_class: "total_increasing"
 
 #----------------------------------------------------------------------
 # POOL PUMP RS-485 COMM
@@ -335,7 +319,8 @@ sensor:
       PoolPumpRS485::instance = myPoolPump;   // save singleton instance
       App.register_component(myPoolPump);
       return {myPoolPump->rpmSensor, 
-              myPoolPump->wattsSensor}; 
+              myPoolPump->wattsSensor, 
+              myPoolPump->runTimeSensor}; 
     sensors:
       - name: "RPM Sensor"
         id: pump_rpm_sensor
@@ -348,6 +333,11 @@ sensor:
         unit_of_measurement: W
         device_class: "power"
         state_class: "measurement"
+      - name: "Pump Run Hours"
+        id: pump_run_hours
+        accuracy_decimals: 4
+        state_class: "measurement"
+        unit_of_measurement: h
 
 #----------------------------------------------------------------------
 # SOLAR PANEL TEMPERATURE
@@ -512,10 +502,9 @@ sensor:
           // if x < 0.15 then current is really 0, it reads 0.15 because
           // the ADC has a minimum voltage that it reads and shows that value
           // even when there is no current flowing (and actual voltage is 0)
-          if (x < 0.15) { return 0.0; } else { return x; }     
-# NOTE: multiply by 0.707 to convert peak amps reading to RMS amps value
-      - multiply: 0.707
-      - offset: 0.095   # calibrated 10/7/2023
+          // NOTE: multiply by 0.707 to convert peak to RMS value, add 
+          // another 0.095 to calibrate based on 10/7/23 calibration test.
+          if (x < 0.15) { return 0.0; } else { return (x * 0.707) + 0.095; }     
     on_value:
       - lambda: |-
           ValvePosition::instance->setCurrent(x);
@@ -598,3 +587,20 @@ switch:
     id: spa_mode
     optimistic: True
     
+#----------------------------------------------------------------------
+# TIME - used to reset min/max temp at midnight
+# https://esphome.io/components/time/index.html
+#----------------------------------------------------------------------
+time:
+  - platform: sntp
+    on_time:
+      - seconds: 0
+        minutes: 0
+        hours: 0
+        then:
+          - lambda: |-
+              // at midnight, reset min/max to current temp
+              float temp = id(water_temperature)->state;
+              id(minimum_water_temperature)->publish_state(temp);
+              id(maximum_water_temperature)->publish_state(temp);
+

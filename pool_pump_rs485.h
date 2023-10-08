@@ -15,7 +15,8 @@ public:
     typedef unsigned long MilliSec;
     
     Sensor* rpmSensor = new Sensor();		// pool pump RPM
-    Sensor* wattsSensor = new Sensor();	// pool pump power consumption
+    Sensor* wattsSensor = new Sensor();	    // pool pump power consumption
+    Sensor* runTimeSensor = new Sensor();   // pool pump run time today, in hours
     
     static PoolPumpRS485* instance;		// singleton instance
     
@@ -81,7 +82,10 @@ public:
     bool shouldRequestSolarSpeedOn = false;
     bool shouldRequestSolarSpeedOff = false;
     
-    MilliSec msLastPumpPoll = 0;
+    MilliSec msLastPumpPoll = 0;                // track time between polling for status
+    
+    MilliSec msLastPumpStatusReply = 0;         // tracks total pump run time for this polling cycle
+    float hrsTotalRunTimeToday = 0;             // hours of total run time today
     
     uint16_t lastPumpRPM = 9999;
     uint16_t lastPumpWatts = 9999;
@@ -98,6 +102,8 @@ public:
     // loop() -- main loop, called about every 16 milliseconds
     //
     void loop() override {
+        const MilliSec msNow = millis();
+        
         static MsgSequencingStates msgSequenceState = waitForNextPollInterval;
         static MsgStates msgState = expectStart;
         static MilliSec msReplyWaitStart = 0;
@@ -135,12 +141,14 @@ public:
                     }
                 }
                 if (msgState != msgComplete) {
-                    MilliSec elapsed = millis() - msReplyWaitStart;
+                    MilliSec elapsed = msNow - msReplyWaitStart;
                     if (elapsed >= ReplyTimeOutMS) {
                         // if we timed out on the pump status message, then report RPM as unknown
                         if (msgSequenceState == waitStatusReply) {
                             rpmSensor->publish_state(std::nan(""));
                             wattsSensor->publish_state(std::nan(""));
+                            // reset the total run time counter for this polling cycle
+                            msLastPumpStatusReply = 0;
                         }
                         msgState = msgComplete;		// timed out, give up, call it done and move on
                         ESP_LOGD("custom","***** WARNING: timed out waiting for RS-485 message (seq:%d)", msgSequenceState);
@@ -156,7 +164,7 @@ public:
             case waitForNextPollInterval:
                 if (isPumpPollingTime()) {
                     msgSequenceState = sendSolarSpeedOn;
-                    msLastPumpPoll = millis();
+                    msLastPumpPoll = msNow;
                 }
                 break;   
                 
@@ -166,7 +174,7 @@ public:
                     sendMessage(pumpSolarSpeedOn, sizeof(pumpSolarSpeedOn));
                     msgSequenceState = waitSolarSpeedOn;
                     msgState = expectStart;
-                    msReplyWaitStart = millis();
+                    msReplyWaitStart = msNow;
                 } else {
                     msgSequenceState = sendSolarSpeedOff;
                 }
@@ -179,7 +187,7 @@ public:
                     sendMessage(pumpSolarSpeedOff, sizeof(pumpSolarSpeedOff));
                     msgSequenceState = waitSolarSpeedOff;
                     msgState = expectStart;
-                    msReplyWaitStart = millis();
+                    msReplyWaitStart = msNow;
                 } else {
                     msgSequenceState = sendStatusRequest;
                 }
@@ -190,7 +198,7 @@ public:
                 sendMessage(pumpStatusRequest, sizeof(pumpStatusRequest));
                 msgSequenceState = waitStatusReply;
                 msgState = expectStart;
-                msReplyWaitStart = millis();
+                msReplyWaitStart = msNow;
                 break;
                 
             case waitSolarSpeedOn:
@@ -210,6 +218,11 @@ public:
                     msgSequenceState = waitForNextPollInterval;		// next sequence state
                 }
                 break;
+        }
+        
+        const MilliSec msElapsed = millis() - msNow;
+        if (msElapsed > 20) {
+            ESP_LOGD("custom","***** loop() took %lu ms", msElapsed);
         }
     }
     
@@ -415,8 +428,32 @@ public:
         //---------------------------
         rpmSensor->publish_state(lastPumpRPM);
         wattsSensor->publish_state(lastPumpWatts);
+        
+        //---------------------------
+        // compute how long the pump has been running for this polling cycle
+        //---------------------------
+        MilliSec msNow = millis();
+        
+        if (msLastPumpStatusReply > 0) {
+            if (lastPumpRPM > 1000) {
+                MilliSec msElapsed = msNow - msLastPumpStatusReply;
+                
+                // get 100% time credit at 2400, more credit when faster, less when slower
+                float timeCreditFactor = lastPumpRPM / 2400.0;     
+                
+                // adjust msElapsed by the timeCreditFactor, convert to seconds
+                float secCredit = (msElapsed / 1000.0) * timeCreditFactor;
+                float hrsCredit = secCredit / 3600.0;
+                
+                // update total run time for today (in hours)
+                hrsTotalRunTimeToday += hrsCredit;
+                runTimeSensor->publish_state( hrsTotalRunTimeToday );
+                //ESP_LOGD("custom","----- RS-485: pump RPM: %0d, factor: %0.2f, credit: %0.1fs, total: %0.4fh",
+                //         (int)lastPumpRPM, timeCreditFactor, secCredit, hrsTotalRunTimeToday);
+            }
+        }
+        msLastPumpStatusReply = msNow;  // start next period
     }
-    
 };
 
 PoolPumpRS485* PoolPumpRS485::instance = 0;
