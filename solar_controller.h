@@ -86,7 +86,7 @@ class SolarController : public PollingComponent, public BinarySensor {
             if (msMissingDataStarted == 0) {
                 msMissingDataStarted == millis();       // start timeout clock
             }
-            ESP_LOGD("custom","***** WARNING: data missing %s", missingStr.c_str());
+            ESP_LOGD("custom","***** WARNING: data missing: %s", missingStr.c_str());
         } else {
             // nothing missing, reset timeout clock
             msMissingDataStarted = 0;       
@@ -99,7 +99,7 @@ class SolarController : public PollingComponent, public BinarySensor {
         MilliSec elapsed = millis() - msValvePositionChanged;
         if (elapsed < MINIMUM_CHANGE_INTERVAL*1000) {
             // it has not been long enough, no change allowed
-            ESP_LOGD("custom","----- SOLAR: NO CHANGE (%0.0f sec elapsed, need %0.0f)", 
+            ESP_LOGD("custom","----- SOLAR: unchanged, too soon (%0.0fs passed, wait %0.0fs)", 
                      elapsed/1000.0, float(MINIMUM_CHANGE_INTERVAL));
             return;
         }

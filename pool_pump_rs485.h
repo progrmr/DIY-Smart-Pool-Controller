@@ -4,6 +4,7 @@
 #define PumpPollIntervalMS 15000
 #define PumpId 0x60
 #define CtlrId 0x10
+#define InvalidAction 0xFF
 #define ReplyTimeOutMS 1000
 #define MinPumpSpeed 0
 #define MaxPumpSpeed 3000
@@ -81,6 +82,7 @@ public:
     
     bool shouldRequestSolarSpeedOn = false;
     bool shouldRequestSolarSpeedOff = false;
+    long pumpSpeedRequested = 0;
     
     MilliSec msLastPumpPoll = 0;                // track time between polling for status
     
@@ -102,78 +104,30 @@ public:
     // loop() -- main loop, called about every 16 milliseconds
     //
     void loop() override {
-        const MilliSec msNow = millis();
-        
         static MsgSequencingStates msgSequenceState = waitForNextPollInterval;
         static MsgStates msgState = expectStart;
         static MilliSec msReplyWaitStart = 0;
         static Message msg;
         
-        switch (msgSequenceState) {
-            case waitSolarSpeedOn:
-            case waitSolarSpeedOff:
-            case waitStatusReply:
-                //-------------------------------
-                // waiting for incoming message
-                //-------------------------------
-                while (available()) {
-                    uint8_t byte = read();
-                    msgState = gotMessageByte(byte, msgState, &msg);
-                    
-                    if (msgState == msgComplete) {
-                        if (checkReceivedMessage(&msg)) {
-                            // we received a reply message
-                            switch (msg.action) {
-                                case requestSetSpeed:
-                                    // NOT IMPLEMENTED YET -- verify the pump did what we requested, 
-                                    // if it didn't there's not much we can do just report errors
-                                    break;
-                                    
-                                case requestStatus:
-                                    handlePumpStatusReply(&msg);
-                                    break;
-                                    
-                                default:
-                                    // invalid or not of interest message
-                                    ESP_LOGD("custom","***** WARNING: unexpected RS-485 message received");
-                            }
-                        }
-                    }
-                }
-                if (msgState != msgComplete) {
-                    MilliSec elapsed = msNow - msReplyWaitStart;
-                    if (elapsed >= ReplyTimeOutMS) {
-                        // if we timed out on the pump status message, then report RPM as unknown
-                        if (msgSequenceState == waitStatusReply) {
-                            rpmSensor->publish_state(std::nan(""));
-                            wattsSensor->publish_state(std::nan(""));
-                            // reset the total run time counter for this polling cycle
-                            msLastPumpStatusReply = 0;
-                        }
-                        msgState = msgComplete;		// timed out, give up, call it done and move on
-                        ESP_LOGD("custom","***** WARNING: timed out waiting for RS-485 message (seq:%d)", msgSequenceState);
-                    }
-                }
-                break;
-                
-            default:
-                break;
-        }
+        const MilliSec msNow = millis();
         
         switch (msgSequenceState) {
             case waitForNextPollInterval:
-                if (isPumpPollingTime()) {
+            {
+                const MilliSec msElapsed = msNow - msLastPumpPoll;
+                if (msElapsed >= PumpPollIntervalMS) {
                     msgSequenceState = sendSolarSpeedOn;
                     msLastPumpPoll = msNow;
                 }
+            }
                 break;   
                 
             case sendSolarSpeedOn:
                 if (shouldRequestSolarSpeedOn) {
                     // transmit a request for pump to switch on to solar speed
                     sendMessage(pumpSolarSpeedOn, sizeof(pumpSolarSpeedOn));
-                    msgSequenceState = waitSolarSpeedOn;
                     msgState = expectStart;
+                    msgSequenceState = waitSolarSpeedOn;
                     msReplyWaitStart = msNow;
                 } else {
                     msgSequenceState = sendSolarSpeedOff;
@@ -183,10 +137,9 @@ public:
             case sendSolarSpeedOff:
                 if (shouldRequestSolarSpeedOff) {
                     // transmit a request for pump to switch off solar speed
-                    ESP_LOGD("custom","vvvvv -- send pump msg: revert to NORMAL SPEED.");
                     sendMessage(pumpSolarSpeedOff, sizeof(pumpSolarSpeedOff));
-                    msgSequenceState = waitSolarSpeedOff;
                     msgState = expectStart;
+                    msgSequenceState = waitSolarSpeedOff;
                     msReplyWaitStart = msNow;
                 } else {
                     msgSequenceState = sendStatusRequest;
@@ -196,45 +149,132 @@ public:
             case sendStatusRequest:
                 // transmit a pump status request via RS-485 serial
                 sendMessage(pumpStatusRequest, sizeof(pumpStatusRequest));
-                msgSequenceState = waitStatusReply;
                 msgState = expectStart;
+                msgSequenceState = waitStatusReply;
                 msReplyWaitStart = msNow;
                 break;
                 
             case waitSolarSpeedOn:
-                if (msgState == msgComplete) {
-                    msgSequenceState = sendStatusRequest;		// next sequence state
-                }
-                break;
-                
             case waitSolarSpeedOff:
-                if (msgState == msgComplete) {
-                    msgSequenceState = sendStatusRequest;		// next sequence state
-                }
-                break;
-                
             case waitStatusReply:
-                if (msgState == msgComplete) {
-                    msgSequenceState = waitForNextPollInterval;		// next sequence state
+                //------------------------------------
+                // wait for more bytes if message is incomplete
+                if (msgState != msgComplete) {
+                    // check for timeouts before we continue waiting for incoming message
+                    MilliSec msReplyWait = msNow - msReplyWaitStart;
+                    if (msReplyWait >= ReplyTimeOutMS) {
+                        // if we timed out on the pump status message, then report RPM as unknown
+                        if (msgSequenceState == waitStatusReply) {
+                            rpmSensor->publish_state(std::nan(""));
+                            wattsSensor->publish_state(std::nan(""));
+                            // reset the total run time counter for this polling cycle
+                            msLastPumpStatusReply = 0;
+                        }
+                        msgState = msgComplete;        // timed out, give up, call it done and move on
+                        ESP_LOGD("custom","***** WARNING: timed out waiting for RS-485 message (seq:%d)", msgSequenceState);
+                        msg.source = CtlrId;
+                        msg.dest   = CtlrId;
+                        msg.action = InvalidAction;     // force it to fail the check later
+                        msg.checksum = 0;
+                    }
                 }
-                break;
-        }
-        
-        const MilliSec msElapsed = millis() - msNow;
-        if (msElapsed > 20) {
-            ESP_LOGD("custom","***** loop() took %lu ms", msElapsed);
+                
+                //------------------------------------
+                // if we don't have a complete message in our receive buffer, 
+                // then check to see if there are available incoming data bytes
+                while (msgState != msgComplete) {
+                    MilliSec msStart = millis();
+                    const bool isAvailable = available();
+                    MilliSec msElapsed = millis() - msStart;
+                    
+                    if (msElapsed >= 10) {
+                        ESP_LOGD("custom","***** WARNING: RS-485 available() took %lu ms", msElapsed);
+                        break;     // taking too long, continue on next loop() call
+                    }
+
+                    if (isAvailable) {
+                        msStart = millis();
+                        uint8_t byte = read();
+                        msgState = gotMessageByte(byte, msgState, &msg);
+                        msElapsed = millis() - msStart;
+                        if (msElapsed >= 10) {
+                            ESP_LOGD("custom","***** WARNING: RS-485 read() + gotMB() took %lu ms", msElapsed);
+                            break;     // taking too long, continue on next loop() call
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                
+                //-------------------------------------
+                // process the complete message
+                //
+                if (msgState == msgComplete) {
+                    // we received a complete reply message (or timed out)
+                    switch (msg.action) {
+                        case requestSetSpeed:
+                            // NOT IMPLEMENTED YET -- verify the pump did what we requested, 
+                            // if it didn't there's not much we can do just report errors
+                            break;
+                            
+                        case requestStatus:
+                            // message won't be valid if we timed out earlier while waiting for it
+                            if (checkReceivedMessage(&msg)) {
+                                handlePumpStatusReply(&msg);
+                            }
+                            break;
+                            
+                        default:
+                            // invalid or not of interest message
+                            ESP_LOGD("custom","***** WARNING: unexpected RS-485 message received");
+                    }
+                    
+                    // we processed the message, transition to next state
+                    switch (msgSequenceState) {
+                        case waitSolarSpeedOn:
+                            msgSequenceState = sendStatusRequest;        // next sequence state
+                            break;
+                            
+                        case waitSolarSpeedOff:
+                            msgSequenceState = sendStatusRequest;        // next sequence state
+                            break;
+                            
+                        case waitStatusReply:
+                            msgSequenceState = waitForNextPollInterval;  // next sequence state
+                            break;
+                    }
+                }
+        } // switch
+ 
+//        const MilliSec msElapsed = millis() - msNow;
+//        if (msElapsed >= 20) {
+//            ESP_LOGD("custom","***** WARNING: RS-485 loop() too slow (%lu ms, seq: %s, msg: %d)", 
+//                     msElapsed, seqImage(msgSequenceState), msgState);
+//        }
+    }
+    
+    const char* const seqImage(MsgSequencingStates state) {
+        switch (state) {
+            case sendSolarSpeedOn: return ("sendSolarSpeedOn");
+            case waitSolarSpeedOn: return ("waitSolarSpeedOn");
+            case sendSolarSpeedOff: return ("sendSolarSpeedOff");
+            case waitSolarSpeedOff: return ("waitSolarSpeedOff");
+            case sendStatusRequest: return ("sendStatusRequest"); 
+            case waitStatusReply: return ("waitStatusReply");
+            case waitForNextPollInterval: return ("waitForNextPollInterval");
+            default: return "???";
         }
     }
     
     //
-    // setPumpSpeed -- needs to check if the pump is running, turn it on
-    //                 if needed, then set it to the desired RPM.
+    // requestPumpSpeed -- needs to check if the pump is running, turn it on
+    //                     if needed, then set it to the desired RPM.
     //
-    void setPumpSpeed(long speed) {
+    void requestPumpSpeed(long speed) {
         if (speed > MaxPumpSpeed) { speed = MaxPumpSpeed; }
         if (speed < MinPumpSpeed) { speed = MinPumpSpeed; }
         
-        ESP_LOGD("custom","----- setPumpSpeed: %ld", speed);
+        ESP_LOGD("custom","----- requestPumpSpeed: %ld", speed);
         
         shouldRequestSolarSpeedOn  = (speed == 2701);
         shouldRequestSolarSpeedOff = (speed == 2401);
@@ -243,15 +283,8 @@ public:
             // adjust last pump poll time so that next poll occurs in 1 second
             setNextPollToHappenIn(1000);        // 1 sec in future
         }
-    }
-    
-    // 
-    // isPumpPollingTime -- determines if we should send pump messages now
-    //
-    const bool isPumpPollingTime() {
-        const MilliSec msElapsed = millis() - msLastPumpPoll;
         
-        return msElapsed >= PumpPollIntervalMS;
+        pumpSpeedRequested = speed;
     }
     
     //
@@ -362,6 +395,10 @@ public:
     // Returns: true if message is valid and of interest
     //
     bool checkReceivedMessage(const Message* msg) {
+        if (msg->source == CtlrId && msg->dest == CtlrId && msg->action == InvalidAction) {
+            return false;           // this message has been zeroed out due to timeout error
+        }
+        
         // ignore certain messages for now
         switch (msg->action) {
             case 2:
@@ -372,9 +409,9 @@ public:
         const bool msgValid = (msg->actualChecksum == msg->checksum);
         
         char str[255];
-        if (msg->source == 0x60 && msg->dest == 0x10) {
+        if (msg->source == PumpId && msg->dest == CtlrId) {
             strcpy(str, "----- RS-485: Pump->Ctlr");
-        } else if (msg->source == 0x10 && msg->dest == 0x60) {
+        } else if (msg->source == CtlrId && msg->dest == PumpId) {
             strcpy(str, "----- RS-485: Ctlr->Pump");
         } else {
             sprintf(str, "********** RS-485: %02X->%02X", msg->source, msg->dest);
@@ -418,41 +455,53 @@ public:
     
     void handlePumpStatusReply(const Message* msg) {
         //---------------------------
-        // Save Pump RPM and Watts
+        // extract Pump RPM and Watts
         //---------------------------
-        lastPumpWatts = (msg->data[3] << 8) | msg->data[4];
-        lastPumpRPM   = (msg->data[5] << 8) | msg->data[6];
+        float curPumpWatts = uint16_t((msg->data[3] << 8) | msg->data[4]);
+        float curPumpRPM   = uint16_t((msg->data[5] << 8) | msg->data[6]);
         
         //---------------------------
-        // publish sensor data
+        // publish RPM and Watts sensor data
         //---------------------------
-        rpmSensor->publish_state(lastPumpRPM);
-        wattsSensor->publish_state(lastPumpWatts);
+        if (fabs(curPumpRPM-lastPumpRPM) > 0.4) {
+            rpmSensor->publish_state(curPumpRPM);
+            lastPumpRPM = curPumpRPM;
+        }
+        if (fabs(curPumpWatts-lastPumpWatts) >= 5) {
+            wattsSensor->publish_state(curPumpWatts);
+            lastPumpWatts = curPumpWatts;
+        }
         
         //---------------------------
-        // compute how long the pump has been running for this polling cycle
+        // compute how long the pump has been running for this polling loop
         //---------------------------
         MilliSec msNow = millis();
         
         if (msLastPumpStatusReply > 0) {
-            if (lastPumpRPM > 1000) {
+            if (curPumpRPM > 1000) {
                 MilliSec msElapsed = msNow - msLastPumpStatusReply;
                 
-                // get 100% time credit at 2400, more credit when faster, less when slower
-                float timeCreditFactor = lastPumpRPM / 2400.0;     
+                // get 100% run time credit at 2400, more when faster, less when slower
+                float timeCreditFactor = curPumpRPM / 2400.0;     
                 
                 // adjust msElapsed by the timeCreditFactor, convert to seconds
                 float secCredit = (msElapsed / 1000.0) * timeCreditFactor;
                 float hrsCredit = secCredit / 3600.0;
                 
-                // update total run time for today (in hours)
-                hrsTotalRunTimeToday += hrsCredit;
-                runTimeSensor->publish_state( hrsTotalRunTimeToday );
-                //ESP_LOGD("custom","----- RS-485: pump RPM: %0d, factor: %0.2f, credit: %0.1fs, total: %0.4fh",
-                //         (int)lastPumpRPM, timeCreditFactor, secCredit, hrsTotalRunTimeToday);
+                if (secCredit >= 0.5) {
+                    // update total run time for today (in hours)
+                    hrsTotalRunTimeToday += hrsCredit;
+                    runTimeSensor->publish_state( hrsTotalRunTimeToday );
+//                    ESP_LOGD("custom","----- RS-485: pump RPM: %0d, factor: %0.2f, credit: %0.1fs, total: %0.4fh",
+//                             (int)curPumpRPM, timeCreditFactor, secCredit, hrsTotalRunTimeToday);
+                }
             }
         }
         msLastPumpStatusReply = msNow;  // start next period
+    }
+    
+    void resetTotalPumpRunTime() {
+        hrsTotalRunTimeToday = 0.0;
     }
 };
 

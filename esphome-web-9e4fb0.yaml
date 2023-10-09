@@ -16,15 +16,15 @@ esphome:
       - delay: 10s
       - lambda: |-
           //---------------------
-          // need to call setPumpSpeed after reboot in case we
+          // need to call requestPumpSpeed after reboot in case we
           // are requesting a particular pump speed.  The C++ class gets
           // reinitialized when booting and we need to restore the speed.
           //---------------------
           auto pumpSpeedRequest = id(pump_speed_request)->state;
           if (!std::isnan(pumpSpeedRequest)) {
             long speed = lroundf(pumpSpeedRequest);
-            ESP_LOGD("custom","===== BOOT: restoring pump RPM request %l", speed);
-            PoolPumpRS485::instance->setPumpSpeed(speed);
+            ESP_LOGD("custom","===== BOOT: restoring requestPumpSpeed RPM %ld", speed);
+            PoolPumpRS485::instance->requestPumpSpeed(speed);
           }
       - delay: 5s
       - lambda: |-
@@ -137,7 +137,9 @@ number:
     initial_value: 0
     set_action:
       - lambda: |-
-          PoolPumpRS485::instance->setPumpSpeed(lroundf(x));
+          long speed = lroundf(x);
+          ESP_LOGD("custom","===== set new requestPumpSpeed RPM: %ld", speed);
+          PoolPumpRS485::instance->requestPumpSpeed(speed);
 
 #----------------------------------------------------------------------
 # POOL TARGET TEMPERATURE
@@ -247,7 +249,7 @@ binary_sensor:
           # valve_power_relay on, with valve_direction_relay off, closes the valve
           - switch.turn_off: valve_direction_relay
           - switch.turn_on: valve_power_relay
-          - delay: 30s
+          - delay: 60s
           - number.set: 
               id: pump_speed_request
               value: 999 
@@ -594,6 +596,12 @@ switch:
 time:
   - platform: sntp
     on_time:
+      - seconds: 0
+        minutes: 50
+        hours: 12
+        then:
+          - lambda: |-
+              PoolPumpRS485::instance->resetTotalPumpRunTime();
       - seconds: 0
         minutes: 0
         hours: 0
