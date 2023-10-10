@@ -1,0 +1,96 @@
+substitutions:
+  devicename: esphome-web-9eebf4
+  friendly_devicename: "Pool Skimmer"
+  deviceip: 192.168.0.138
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_devicename}
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "BZi9j/zOhXQOXMWLe5aGxtTfuFkF7hrxNcdGdfqtBKI="
+
+ota:
+
+wifi:
+  networks:
+  - ssid: !secret wifi_ssid
+    password: !secret wifi_password
+
+  # Optional manual IP
+  manual_ip:
+    static_ip: ${deviceip}
+    gateway: 192.168.0.1
+    subnet: 255.255.255.0
+
+captive_portal:
+    
+#deep_sleep:
+#  run_duration: 60s
+# sleep_duration: 9min
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO32
+      id: switch1
+      mode: 
+        input: True 
+        pullup: True
+    name: "High Water"
+    id: water_hi
+    device_class: moisture
+# NOTE: sensor may bounce between wet/dry from people splashing in pool.
+    filters:
+      - delayed_on_off: 5s
+
+  - platform: gpio
+    pin: 
+      number: GPIO33
+      id: switch2
+      mode:
+        input: True
+        pullup: True
+    name: "Low Water"
+    id: water_lo
+    device_class: moisture
+# NOTE: sensor may bounce between wet/dry from people splashing in pool.
+    filters:
+      - delayed_on_off: 5s
+
+dallas:
+  - pin: GPIO16
+    update_interval: 60s
+
+sensor:
+  - platform: dallas
+    address: 0xc53de10457d7ea28
+    name: "Water Temperature"
+    id: water_temperature
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 1
+    filters:
+      - offset: -0.3
+      - sliding_window_moving_average:
+          window_size: 10
+          send_every: 5
+          
+  - platform: wifi_signal
+    name: "WiFi Signal dB"
+    id: wifi_signal_db
+    entity_category: "diagnostic"
+    update_interval: 120s
+
+  - platform: internal_temperature
+    name: "CPU Temperature"
