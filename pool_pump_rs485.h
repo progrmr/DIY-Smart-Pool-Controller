@@ -222,6 +222,29 @@ public:
                             if (checkReceivedMessage(&msg)) {
                                 handlePumpStatusReply(&msg);
                             }
+//                        {
+//                            // ********************  DEBUG CODE -- REMOVE AFTER TESTING
+//                            // ********************  DEBUG CODE -- REMOVE AFTER TESTING
+//                            // ********************  DEBUG CODE -- REMOVE AFTER TESTING
+//                            // ********************  DEBUG CODE -- REMOVE AFTER TESTING
+//                            auto sntp = id(local_sntp_time);
+//                            ESPTime time = sntp.now(); 
+//                            // https://github.com/esphome/esphome/blob/c77a9ad3630802376ab65d79d73d5663c79bf6a4/esphome/core/time.h
+//                            auto utc = sntp.utcnow();
+//                            std::string tz = sntp.get_timezone();
+//                            
+//                            int utcHour = utc.hour;
+//                            int utcMin = utc.minute;
+//                            
+//                            int hour = time.hour;
+//                            int minute = time.minute;
+//                            int second = time.second;
+//                            ESP_LOGD("custom","---------- TIME: %d-%d-%d %02d:%02d:%02d %02d:%02d (TZ: %s)", 
+//                                     time.year, time.month, time.day_of_month, 
+//                                     time.hour, time.minute, time.second, 
+//                                     utc.hour, utc.minute, 
+//                                     tz.c_str());
+//                        }
                             break;
                             
                         default:

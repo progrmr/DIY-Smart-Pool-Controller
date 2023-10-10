@@ -75,6 +75,7 @@ wifi:
     static_ip: ${deviceip}
     gateway: 192.168.0.1
     subnet: 255.255.255.0
+    dns1: 192.168.0.1
 
 #----------------------------------------------------------------------
 # UART is used for RS-485 serial comm with the Pentair Pool Pump
@@ -595,20 +596,17 @@ switch:
 #----------------------------------------------------------------------
 time:
   - platform: sntp
+    id: local_sntp_time
     on_time:
-      - seconds: 0
-        minutes: 50
-        hours: 12
-        then:
-          - lambda: |-
-              PoolPumpRS485::instance->resetTotalPumpRunTime();
       - seconds: 0
         minutes: 0
         hours: 0
         then:
           - lambda: |-
+              // at midnight, reset pump run time to 0
+              PoolPumpRS485::instance->resetTotalPumpRunTime();
+              
               // at midnight, reset min/max to current temp
               float temp = id(water_temperature)->state;
               id(minimum_water_temperature)->publish_state(temp);
               id(maximum_water_temperature)->publish_state(temp);
-
