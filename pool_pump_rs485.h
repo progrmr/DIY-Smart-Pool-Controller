@@ -8,6 +8,7 @@
 #define ReplyTimeOutMS 1000
 #define MinPumpSpeed 0
 #define MaxPumpSpeed 3000
+#define NDaysPumpHistory 7
 
 class PoolPumpRS485 : public Component, public UARTDevice {
 public:
@@ -17,7 +18,7 @@ public:
     
     Sensor* rpmSensor = new Sensor();		// pool pump RPM
     Sensor* wattsSensor = new Sensor();	    // pool pump power consumption
-    Sensor* runTimeSensor = new Sensor();   // pool pump run time today, in hours
+    Sensor* runTimeSensor = new Sensor();   // today's total pump run time, in hours
     
     static PoolPumpRS485* instance;		// singleton instance
     
@@ -88,9 +89,13 @@ public:
     
     MilliSec msLastPumpStatusReply = 0;         // tracks total pump run time for this polling cycle
     float hrsTotalRunTimeToday = 0;             // hours of total run time today
+    float pumpRunHours[NDaysPumpHistory] = {0.0};  // 7 day history of run time, hrs per day, [0]==today
     
     uint16_t lastPumpRPM = 9999;
     uint16_t lastPumpWatts = 9999;
+    
+    // track pump startup time
+    MilliSec msPumpStartTime = 0;        // millis() time of when pump started up
     
     // 
     // setup() -- one time setup
@@ -165,8 +170,8 @@ public:
                     if (msReplyWait >= ReplyTimeOutMS) {
                         // if we timed out on the pump status message, then report RPM as unknown
                         if (msgSequenceState == waitStatusReply) {
-                            rpmSensor->publish_state(std::nan(""));
-                            wattsSensor->publish_state(std::nan(""));
+                            rpmSensor->publish_state(NAN);
+                            wattsSensor->publish_state(NAN);
                             // reset the total run time counter for this polling cycle
                             msLastPumpStatusReply = 0;
                         }
@@ -476,6 +481,9 @@ public:
         return msgValid;
     }
     
+    //-----------------------------------------------------
+    // handlePumpStatusReply - got status from pump
+    //-----------------------------------------------------
     void handlePumpStatusReply(const Message* msg) {
         //---------------------------
         // extract Pump RPM and Watts
@@ -487,19 +495,26 @@ public:
         // publish RPM and Watts sensor data
         //---------------------------
         if (fabs(curPumpRPM-lastPumpRPM) > 0.4) {
+            // RPM changed, publish an update
             rpmSensor->publish_state(curPumpRPM);
             lastPumpRPM = curPumpRPM;
         }
         if (fabs(curPumpWatts-lastPumpWatts) >= 5) {
+            // Watts changed, publish an update
             wattsSensor->publish_state(curPumpWatts);
             lastPumpWatts = curPumpWatts;
         }
+        
+        // update pump start time tracker -- needs to know when pumping
+        updatePumpStartTime(curPumpRPM);
         
         //---------------------------
         // compute how long the pump has been running for this polling loop
         //---------------------------
         MilliSec msNow = millis();
         
+        // if we have the time of the previous pump status message and
+        // the pump is running, then count the elapsed run time
         if (msLastPumpStatusReply > 0) {
             if (curPumpRPM > 1000) {
                 MilliSec msElapsed = msNow - msLastPumpStatusReply;
@@ -509,23 +524,68 @@ public:
                 
                 // adjust msElapsed by the timeCreditFactor, convert to seconds
                 float secCredit = (msElapsed / 1000.0) * timeCreditFactor;
-                float hrsCredit = secCredit / 3600.0;
                 
                 if (secCredit >= 0.5) {
                     // update total run time for today (in hours)
-                    hrsTotalRunTimeToday += hrsCredit;
-                    runTimeSensor->publish_state( hrsTotalRunTimeToday );
-//                    ESP_LOGD("custom","----- RS-485: pump RPM: %0d, factor: %0.2f, credit: %0.1fs, total: %0.4fh",
-//                             (int)curPumpRPM, timeCreditFactor, secCredit, hrsTotalRunTimeToday);
+                    float hrsCredit = secCredit / 3600.0;
+                    pumpRunHours[0] += hrsCredit;
+                    runTimeSensor->publish_state( pumpRunHours[0] );
+                    //                    ESP_LOGD("custom","----- RS-485: pump RPM: %0d, factor: %0.2f, credit: %0.1fs, total: %0.4fh",
+                    //                             (int)curPumpRPM, timeCreditFactor, secCredit, pumpRunHours[0]);
                 }
             }
         }
         msLastPumpStatusReply = msNow;  // start next period
     }
     
+    //-----------------------------------------------------
+    // midnight reset of pump run time history
+    // save run time totals for past few days, 
+    // zero out today's run time and start counting again.
+    //-----------------------------------------------------
     void resetTotalPumpRunTime() {
-        hrsTotalRunTimeToday = 0.0;
+        // shift the past days history over by 1 into higher array slots,
+        // [0]==today, [1]==1 day ago, [2]==2 days ago, ... [6]==6 days ago
+        //
+        int day = NDaysPumpHistory-1;       // start with last index
+        while (day >= 1) {
+            pumpRunHours[day] = pumpRunHours[day-1];
+            day++;
+        }
+        // zero out run time, a new day is starting
+        pumpRunHours[0] = 0.0; 
     }
+
+    void updatePumpStartTime(float pumpRPM) {
+        // track pump turn on/off time
+        const isPumpSpeedValid = !std::isnan(pumpRPM);
+        const isPumpRunning = isPumpSpeedValid && (pumpRPM >= 1000);
+        
+        if (isPumpRunning) {
+            // pump is RUNNING
+            if (msPumpStartTime == 0) {
+                // we have no pump start time, so it must have 
+                // been OFF previously, and it has just started up, 
+                // record the start time
+                msPumpStartTime = millis();
+            }
+        } else {
+            // pump is OFF, we have no start time
+            msPumpStartTime = 0;
+        }
+    }
+    
+    const bool isPipeTempValid() {
+        if (msPumpStartTime == 0) {
+            return false;       // pump is not running
+        }
+        const MilliSec msElapsed = millis() - msPumpStartTime;
+        const float secsPumpOn = msElapsed / 1000.0;
+        
+        return secsPumpOn >= PIPE_TEMP_VALID_INTERVAL;
+    }
+    
+
 };
 
 PoolPumpRS485* PoolPumpRS485::instance = 0;

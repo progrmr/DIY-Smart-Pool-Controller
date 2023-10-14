@@ -1,13 +1,21 @@
 #include "esphome.h"
 
-#define SPA_TARGET_TOLERANCE (0.6)      // degrees F, how much to overshoot/undershoot target pool temp
-#define POOL_TARGET_TOLERANCE (0.3)     // degrees F, how much to overshoot/undershoot target pool temp
-#define PANEL_START_OFFSET (4)          // degrees F, how many degrees panel must be above water temp to start solar
-#define PANEL_STOP_OFFSET (2)           // degrees F, how many degrees panels must be above water temp to stop solar
+#define SPA_TARGET_TOLERANCE (0.6)  // in ºF, how much to overshoot/undershoot target pool temp
+#define POOL_TARGET_TOLERANCE (0.3) // in ºF, how much to overshoot/undershoot target pool temp
+
+// PANEL_START_OFFSET - in ºF, how many degrees panels must be > water 
+// temp in order to turn on solar
+#define PANEL_START_OFFSET (4)      
+
+// PANEL_STOP_OFFSET - in ºF, how many degrees panel must be > water temp
+// in order to keep solar on, if panels drop below this temp, solar turns off
+#define PANEL_STOP_OFFSET (2)       
 
 #define POLLING_INTERVAL (30)           // seconds, how often to evaluate 
+#define TIMEOUT_INTERVAL (30)           // seconds, timeout waiting for reply data
+
 #define MINIMUM_CHANGE_INTERVAL (5*60)  // seconds, don't change valve unless this time has passed
-#define TIMEOUT_INTERVAL (30)           // seconds, timeout waiting for data
+#define PIPE_TEMP_VALID_INTERVAL (5*60) // seconds, time it takes for thermister in pipe to get to correct water temp after water flow starts (pump starts)
 
 class SolarController : public PollingComponent, public BinarySensor {
   public:
@@ -24,8 +32,6 @@ class SolarController : public PollingComponent, public BinarySensor {
         solarEnabled,
     };
     
-    const float nan = std::nan("");
-    
     // track solar heat state
     //
     MilliSec msSolarHeatStateChanged = 0;       // millis() time of last state change
@@ -40,10 +46,10 @@ class SolarController : public PollingComponent, public BinarySensor {
     //
     MilliSec msMissingDataStarted = 0;          // millis() time of first missing data event
     bool spaMode = false;
-    float pumpRPM     = std::nan("");
-    float waterTempF  = std::nan("");
-    float targetTempF = std::nan("");
-    float panelTempF  = std::nan("");
+    float pumpRPM     = NAN;
+    float waterTempF  = NAN;
+    float targetTempF = NAN;
+    float panelTempF  = NAN;
     
     void setup() override {
         const MilliSec now = millis();
@@ -52,19 +58,17 @@ class SolarController : public PollingComponent, public BinarySensor {
     }
     
     void update() override {
-        //const bool rpmHasState = id(pump_rpm_sensor).has_state();
-        
         // gather all the data we need to decide whether to enable or disable solar
         //
         spaMode = id(spa_mode).state;
         if (spaMode) {
-            targetTempF = id(spa_target_temp).has_state() ? id(spa_target_temp).state : nan;
+            targetTempF = id(spa_target_temp).has_state() ? id(spa_target_temp).state : NAN;
         } else {
-            targetTempF = id(pool_target_temp).has_state() ? id(pool_target_temp).state : nan;
+            targetTempF = id(pool_target_temp).has_state() ? id(pool_target_temp).state : NAN;
         }
-        pumpRPM = id(pump_rpm_sensor).has_state() ? id(pump_rpm_sensor).state : nan;
-        waterTempF = id(water_temperature).has_state() ? CtoF( id(water_temperature).state ) : nan;
-        panelTempF = id(panel_temperature).has_state() ? CtoF(id(panel_temperature).state) : nan;
+        pumpRPM = id(pump_rpm_sensor).has_state() ? id(pump_rpm_sensor).state : NAN;
+        waterTempF = id(water_temperature).has_state() ? CtoF(id(water_temperature).state) : NAN;
+        panelTempF = id(panel_temperature).has_state() ? CtoF(id(panel_temperature).state) : NAN;
 
         // check for missing data
         //

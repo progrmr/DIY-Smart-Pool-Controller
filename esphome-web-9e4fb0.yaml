@@ -39,7 +39,7 @@ esphome:
           id(valve_actuator_amps)->publish_state(0);
           id(peak_current)->publish_state(0);
           id(actuation_time)->publish_state(0);
-      - delay: 5s
+      - delay: 15s
       - lambda: |-
           uint32_t notConnectedCount = 0;
           while (!WiFi.isConnected()) {
@@ -107,8 +107,8 @@ number:
     initial_value: 0.7
     device_class: "current"
     mode: box
-    # need to do something with the limit, when actual current exceeds limit
-    ## NOT IMPLEMENTED YET ##
+    # do something with the limit, when actual current exceeds limit
+    # NOTE: automation in HA detects over limit and sends notifications
 
 #----------------------------------------------------------------------
 # PUMP SPEED REQUEST
@@ -138,7 +138,7 @@ number:
     initial_value: 0
     set_action:
       - lambda: |-
-          long speed = lroundf(x);
+          const long speed = lroundf(x);
           ESP_LOGD("custom","===== set new requestPumpSpeed RPM: %ld", speed);
           PoolPumpRS485::instance->requestPumpSpeed(speed);
 
@@ -314,6 +314,8 @@ sensor:
 # pump reverts to preprogrammed schedule or speed if we stop sending
 # the speed commands for longer than 30 seconds or so.
 # 
+# Pump Run Hours - today's total hours where pump RPM > 1000 RPM
+# 
 # https://esphome.io/components/sensor/custom.html
 #----------------------------------------------------------------------
   - platform: custom
@@ -384,18 +386,25 @@ sensor:
       - 3602Ohm -> 50°C
     on_value:
       lambda: |-
-        auto minTemp = id(minimum_water_temperature);
-        if (x < minTemp->state || std::isnan(minTemp->state)) {
-          // publish a new minimum water temperature
-          minTemp->publish_state(x);
-        }
-        auto maxTemp = id(maximum_water_temperature);
-        if (x > maxTemp->state || std::isnan(minTemp->state)) {
-          // publish a new maximum water temperature
-          maxTemp->publish_state(x);
+        if (!std::isnan(x)) {
+            auto minTemp = id(minimum_water_temperature);
+            if (std::isnan(minTemp->state) || x < minTemp->state) {
+              // publish a new minimum water temperature
+              minTemp->publish_state(x);
+            }
+            auto maxTemp = id(maximum_water_temperature);
+            if (std::isnan(maxTemp->state) || x > maxTemp->state) {
+              // publish a new maximum water temperature
+              maxTemp->publish_state(x);
+            }
         }
     filters:
-      - offset: 0.11
+      - lambda: |-
+          if PoolPumpRS485::instance->isPipeTempValid() {
+            return x + 0.11;    // add 0.11 based on calibration check
+          } else {
+            return NAN;   // ignore reading, water not flowing in pipe
+          }
       - sliding_window_moving_average:
           window_size: 5
           send_every: 5
