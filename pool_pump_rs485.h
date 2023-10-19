@@ -51,7 +51,7 @@ public:
     };
     
     //
-    // RS-485 Message Actions
+    // RS-485 Message Actions (codes used by Intelliflo pump)
     //
     enum MsgActions {
         noAction = 0,
@@ -558,8 +558,8 @@ public:
 
     void updatePumpStartTime(float pumpRPM) {
         // track pump turn on/off time
-        const isPumpSpeedValid = !std::isnan(pumpRPM);
-        const isPumpRunning = isPumpSpeedValid && (pumpRPM >= 1000);
+        const bool isPumpSpeedValid = !std::isnan(pumpRPM);
+        const bool isPumpRunning = isPumpSpeedValid && (pumpRPM >= 1000);
         
         if (isPumpRunning) {
             // pump is RUNNING
