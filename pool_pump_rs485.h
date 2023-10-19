@@ -10,6 +10,10 @@
 #define MaxPumpSpeed 3000
 #define NDaysPumpHistory 7
 
+// seconds, time it takes for thermister in pipe to get to correct water 
+// temp after water flow starts (pump running)
+#define PIPE_TEMP_VALID_INTERVAL (4*60) 
+
 class PoolPumpRS485 : public Component, public UARTDevice {
 public:
     PoolPumpRS485(UARTComponent *parent) : UARTDevice(parent) {}
