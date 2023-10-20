@@ -181,6 +181,24 @@ number:
     max_value: 105
     step: 1
     initial_value: 100
+    on_value:
+      then:
+        - lambda: 'PoolPumpRS485::instance->printDebugInfo();'
+
+#----------------------------------------------------------------------
+# PUMP RUN TIME TARGET 
+# This is the number of hours the pump should run per day to get
+# enough water filtration done.  Solar and non-solar hours count.
+#----------------------------------------------------------------------
+  - platform: template
+    name: "Pump Target Hours"
+    id: pump_target_hours
+    update_interval: never
+    optimistic: True
+    restore_value: True
+    max_value: 10
+    min_value: 4
+    step: 0.5
 
 #----------------------------------------------------------------------
 # VALVE POSITION (SOLAR)

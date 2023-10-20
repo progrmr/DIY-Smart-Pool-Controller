@@ -54,21 +54,6 @@ class SolarController : public PollingComponent, public BinarySensor {
     void update() override {
         const bool spaMode = id(spa_mode).state;
         
-        // Time Check: we don't want to run the pump from 1600-2100 local,
-        // because that's SDGE peak rates (exception: allow if in Spa mode)
-        //
-        if (!spaMode) {
-            auto sntp = id(local_sntp_time);
-            const ESPTime timeNow = sntp.now(); 
-            const int hour = timeNow.hour;
-            if (hour >= 16 && hour <= 21) {
-                ESP_LOGD("custom","----- SOLAR: OFF (%02d:%02d is peak rates)", 
-                         hour, timeNow.minute);
-                setSolarHeatState(solarDisabled);
-                return;
-            }
-        }
-        
         // Check to see if the pump is running.  For now, we will not try to start
         // the pump here.  We only will enable solar heat if the pump is already
         // running and all the other conditions are met.
@@ -85,6 +70,21 @@ class SolarController : public PollingComponent, public BinarySensor {
             return;
         }
 
+        // Time Check: we don't want to run the pump from 1600-2100 local,
+        // because that's SDGE peak rates (exception: allow if in Spa mode)
+        //
+        if (!spaMode) {
+            auto sntp = id(local_sntp_time);
+            const ESPTime timeNow = sntp.now(); 
+            const int hour = timeNow.hour;
+            if (hour >= 16 && hour <= 21) {
+                ESP_LOGD("custom","----- SOLAR: OFF (%02d:%02d is peak rates)", 
+                         hour, timeNow.minute);
+                setSolarHeatState(solarDisabled);
+                return;
+            }
+        }
+        
         // See how long it has been since we turned on/off the solar valve,
         // we limit how often it can change so we don't keep toggling back and
         // forth and burn it out.  If it has been at least 5 minutes then we
@@ -94,7 +94,7 @@ class SolarController : public PollingComponent, public BinarySensor {
         MilliSec msElapsed = millis() - msValvePositionChanged;
         if (msElapsed < MINIMUM_CHANGE_INTERVAL*1000) {
             // it has not been long enough, no change allowed
-            ESP_LOGD("custom","----- SOLAR: unchanged, too soon (%0.0fs passed, wait %0.0fs)", 
+            ESP_LOGD("custom","----- SOLAR: too soon to change (only %0.0fs, wait %0.0fs)", 
                      msElapsed/1000.0, float(MINIMUM_CHANGE_INTERVAL));
             // don't disable or enable solar, leave it unchanged,
             // we turned the valve recently, too soon to change it again
@@ -135,7 +135,7 @@ class SolarController : public PollingComponent, public BinarySensor {
             if (msMissingDataStarted == 0) {
                 msMissingDataStarted == millis();       // start timeout clock
             }
-            ESP_LOGD("custom","***** WARNING: missing%s", missingStr.c_str());
+            ESP_LOGD("custom","***** WARNING: solar missing: %s", missingStr.c_str());
         } else {
             // nothing missing, reset timeout clock
             msMissingDataStarted = 0;       

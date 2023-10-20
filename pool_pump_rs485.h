@@ -23,6 +23,7 @@ public:
     Sensor* rpmSensor = new Sensor();		// pool pump RPM
     Sensor* wattsSensor = new Sensor();	    // pool pump power consumption
     Sensor* runTimeSensor = new Sensor();   // today's total pump run time, in hours
+    Sensor* targetRunHours = new Sensor();  // hours pump should run per day
     
     static PoolPumpRS485* instance;		// singleton instance
     
@@ -509,8 +510,15 @@ public:
             lastPumpWatts = curPumpWatts;
         }
         
+        //---------------------------
         // update pump start time tracker -- needs to know when pumping
+        //---------------------------
         updatePumpStartTime(curPumpRPM);
+        
+        //---------------------------
+        // update pump run time target hours (if temp valid)
+        //---------------------------
+        updatePumpTargetHours();
         
         //---------------------------
         // compute how long the pump has been running for this polling loop
@@ -534,8 +542,6 @@ public:
                     float hrsCredit = secCredit / 3600.0;
                     pumpRunHours[0] += hrsCredit;
                     runTimeSensor->publish_state( pumpRunHours[0] );
-                    //                    ESP_LOGD("custom","----- RS-485: pump RPM: %0d, factor: %0.2f, credit: %0.1fs, total: %0.4fh",
-                    //                             (int)curPumpRPM, timeCreditFactor, secCredit, pumpRunHours[0]);
                 }
             }
         }
@@ -546,6 +552,8 @@ public:
     // midnight reset of pump run time history
     // save run time totals for past few days, 
     // zero out today's run time and start counting again.
+    //
+    // NOTE: this is called at midnight from yaml in the sntp lambda
     //-----------------------------------------------------
     void resetTotalPumpRunTime() {
         // shift the past days history over by 1 into higher array slots,
@@ -554,7 +562,7 @@ public:
         int day = NDaysPumpHistory-1;       // start with last index
         while (day >= 1) {
             pumpRunHours[day] = pumpRunHours[day-1];
-            day++;
+            day--;
         }
         // zero out run time, a new day is starting
         pumpRunHours[0] = 0.0; 
@@ -579,6 +587,49 @@ public:
         }
     }
     
+    float CtoF(float centigrade) {
+        return (centigrade * 1.8) + 32.0;
+    }
+
+    void updatePumpTargetHours() {        
+        const bool spaMode = id(spa_mode).state;
+        if (spaMode || !isPipeTempValid()) {
+            return;     // this only applies to pool temperature
+        }
+        
+        auto waterTempC = id(water_temperature);
+        float waterTempF = waterTempC.has_state() ? CtoF(waterTempC.state) : NAN;
+        
+        if (std::isnan(waterTempF)) {
+            return;     // can't do this without water temp
+        }
+
+        static int prevTargetHours = 0;
+        int targetHours = 0;
+        
+        // we have a valid water temp, choose the run time
+        if (waterTempF >= 90) {
+            targetHours = 11;
+        } else if (waterTempF >= 85) {
+            targetHours = 10;
+        } else if (waterTempF >= 80) {
+            targetHours = 9;
+        } else if (waterTempF >= 75) {
+            targetHours = 8;
+        } else if (waterTempF >= 70) {
+            targetHours = 7;
+        } else if (waterTempF >= 60) {
+            targetHours = 6;
+        } else {
+            targetHours = 5;
+        }
+        
+        if (targetHours != prevTargetHours) {
+            id(pump_target_hours).publish_state(float(targetHours));
+            prevTargetHours = targetHours;
+        }
+    }
+    
     const bool isPipeTempValid() {
         if (msPumpStartTime == 0) {
             return false;       // pump is not running
@@ -589,7 +640,14 @@ public:
         return secsPumpOn >= PIPE_TEMP_VALID_INTERVAL;
     }
     
-
+    // called from yaml in a lambda, as desired
+    void printDebugInfo() {
+        char str[256] = {0};
+        for (int i=0; i<NDaysPumpHistory; i++) {
+            sprintf(str+strlen(str), "%0.1f ", pumpRunHours[i]);
+        }
+        ESP_LOGD("custom","----- Pump hours/day: %s", str);
+    }
 };
 
 PoolPumpRS485* PoolPumpRS485::instance = 0;
