@@ -32,13 +32,11 @@ esphome:
           // need to init various sensors, they don't get
           // restored after a reboot
           //---------------------
-          ESP_LOGD("custom","===== BOOT: restoring min/max water temps, amps/peak");
-          float curTemp = id(water_temperature).state;
-          id(minimum_water_temperature)->publish_state(curTemp);
-          id(maximum_water_temperature)->publish_state(curTemp);
           id(valve_actuator_amps)->publish_state(0);
           id(peak_current)->publish_state(0);
           id(actuation_time)->publish_state(0);
+          //id(pump_run_hours)->publish_state(0);
+          //id(pump_target_hours)->publish_state(8);
       - delay: 15s
       - lambda: |-
           uint32_t notConnectedCount = 0;
@@ -186,21 +184,6 @@ number:
         - lambda: 'PoolPumpRS485::instance->printDebugInfo();'
 
 #----------------------------------------------------------------------
-# PUMP RUN TIME TARGET 
-# This is the number of hours the pump should run per day to get
-# enough water filtration done.  Solar and non-solar hours count.
-#----------------------------------------------------------------------
-  - platform: template
-    name: "Pump Target Hours"
-    id: pump_target_hours
-    update_interval: never
-    optimistic: True
-    restore_value: True
-    max_value: 10
-    min_value: 4
-    step: 0.5
-
-#----------------------------------------------------------------------
 # VALVE POSITION (SOLAR)
 #
 # Valve Position can be:  unknown, opening, closing, opened, closed
@@ -288,7 +271,7 @@ sensor:
     sensors:
       - name: "Peak Current"
         id: peak_current
-        accuracy_decimals: 3
+        accuracy_decimals: 2
         unit_of_measurement: A
         device_class: "current"
         state_class: "measurement"
@@ -343,24 +326,48 @@ sensor:
       App.register_component(myPoolPump);
       return {myPoolPump->rpmSensor, 
               myPoolPump->wattsSensor, 
-              myPoolPump->runTimeSensor}; 
+              myPoolPump->runTimeSensor,
+              myPoolPump->targetRunHours,
+              myPoolPump->runHoursDeficit}; 
     sensors:
+        # RPM - pump speed now
       - name: "RPM Sensor"
         id: pump_rpm_sensor
+        accuracy_decimals: 0
         unit_of_measurement: RPM
-        device_class: "speed"
         state_class: "measurement"
+        device_class: "speed"
+        # WATTS - pump watt consumption now
       - name: "Watts Sensor"
         id: pump_watts_sensor
         accuracy_decimals: 0
         unit_of_measurement: W
-        device_class: "power"
         state_class: "measurement"
+        device_class: "power"
+        # PUMP RUN HOURS - total number of hours pump has run today.  Hours
+        # where pump is 2400 RPM get 100% credit, faster gets more hrs,
+        # slow speeds get less hours.
       - name: "Pump Run Hours"
         id: pump_run_hours
         accuracy_decimals: 4
-        state_class: "measurement"
         unit_of_measurement: h
+        state_class: "measurement"
+        device_class: "duration"
+        # PUMP TARGET HOURS 
+        # This is the number of hours the pump should run per day to get
+        # enough water filtration done.  Solar and non-solar hours count.
+      - name: "Pump Target Hours"
+        id: pump_target_hours
+        accuracy_decimals: 1
+        unit_of_measurement: h
+        state_class: "measurement"
+        device_class: "duration"
+      - name: "Pump Hours Deficit"
+        id: pump_hours_deficit
+        accuracy_decimals: 1
+        unit_of_measurement: h
+        state_class: "measurement"
+        device_class: "duration"
 
 #----------------------------------------------------------------------
 # SOLAR PANEL TEMPERATURE
@@ -522,22 +529,23 @@ sensor:
     name: "Valve Actuator Current"
     id: valve_actuator_amps
     unit_of_measurement: A
-    accuracy_decimals: 3
+    device_class: "current"
+    state_class: "measurement"
+    accuracy_decimals: 2
     attenuation: 6db
 # NOTE: update_interval of never here, but we manually update every 2-3s when
 #       the actuator power is on, if power is off, current *should* be zero.
     update_interval: never  
     filters:
       - lambda: |-
-          // if x < 0.15 then current is really 0, it reads 0.15 because
+          // NOTE1: if x < 0.15 then current is really 0, it reads 0.15 because
           // the ADC has a minimum voltage that it reads and shows that value
           // even when there is no current flowing (and actual voltage is 0)
-          // NOTE: multiply by 0.707 to convert peak to RMS value, add 
-          // another 0.095 to calibrate based on 10/7/23 calibration test.
+          // NOTE2: multiply by 0.707 to convert peak to RMS value, add 
+          // another 0.095 to adjust based on 10/7/23 calibration w/multimeter.
           if (x < 0.15) { return 0.0; } else { return (x * 0.707) + 0.095; }     
     on_value:
-      - lambda: |-
-          ValvePosition::instance->setCurrent(x);
+      - lambda: 'ValvePosition::instance->setCurrent(x);'
 
   - platform: wifi_signal
     name: "WiFi Signal dB"

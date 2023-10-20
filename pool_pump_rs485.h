@@ -8,7 +8,7 @@
 #define ReplyTimeOutMS 1000
 #define MinPumpSpeed 0
 #define MaxPumpSpeed 3000
-#define NDaysPumpHistory 7
+#define NDaysPumpHistory 3
 
 // seconds, time it takes for thermister in pipe to get to correct water 
 // temp after water flow starts (pump running)
@@ -24,6 +24,7 @@ public:
     Sensor* wattsSensor = new Sensor();	    // pool pump power consumption
     Sensor* runTimeSensor = new Sensor();   // today's total pump run time, in hours
     Sensor* targetRunHours = new Sensor();  // hours pump should run per day
+    Sensor* runHoursDeficit = new Sensor(); // pump run hours deficit from past 2 days
     
     static PoolPumpRS485* instance;		// singleton instance
     
@@ -94,7 +95,9 @@ public:
     
     MilliSec msLastPumpStatusReply = 0;         // tracks total pump run time for this polling cycle
     float hrsTotalRunTimeToday = 0;             // hours of total run time today
-    float pumpRunHours[NDaysPumpHistory] = {0.0};  // 7 day history of run time, hrs per day, [0]==today
+    float pumpRunHours[NDaysPumpHistory];       // past history of run time, hrs per day, [0]==today
+    float pumpTargetRunHours = NAN;             // target hours per day to run the pump
+    float pumpRunHoursDeficit = NAN;            // past 2 days hours deficit
     
     uint16_t lastPumpRPM = 9999;
     uint16_t lastPumpWatts = 9999;
@@ -106,8 +109,17 @@ public:
     // setup() -- one time setup
     //
     void setup() override {
-        // not much to do here
+        // init a few things
         msLastPumpPoll = millis();		// init time of "previous" polling interval
+        
+        // init states
+        runTimeSensor->publish_state( pumpRunHours[0] );
+        
+        // set history to unknown (skip [0], leave today at 0.0)
+        for (int i=1; i<NDaysPumpHistory; i++) {
+            pumpRunHours[i] = NAN;      // history is unknown on reboot
+        }
+        pumpRunHours[0] = 0;            // today starts with 0 hours
     }
     
     //
@@ -512,13 +524,15 @@ public:
         
         //---------------------------
         // update pump start time tracker -- needs to know when pumping
-        //---------------------------
         updatePumpStartTime(curPumpRPM);
         
         //---------------------------
         // update pump run time target hours (if temp valid)
-        //---------------------------
         updatePumpTargetHours();
+
+        //---------------------------
+        // update pump run hours deficit
+        updatePumpHoursDeficit();
         
         //---------------------------
         // compute how long the pump has been running for this polling loop
@@ -587,6 +601,38 @@ public:
         }
     }
     
+    void updatePumpHoursDeficit() {
+        if (std::isnan(pumpTargetRunHours)) {
+            return;     // target run hours is unknown
+        }
+        
+        int nDaysHistory = 0;
+        float pastDaysHours = 0;
+        float desiredPastDaysHours = 0;
+        
+        for (int i=1; i<NDaysPumpHistory; i++) {
+            if (!std::isnan(pumpRunHours[i])) {
+                nDaysHistory++;
+                pastDaysHours += pumpRunHours[i];
+                desiredPastDaysHours += pumpTargetRunHours;
+            }
+        }
+        
+        if (nDaysHistory == 0) {
+            return;     // no history hours
+        }
+        
+        float newDeficitHours = desiredPastDaysHours - pastDaysHours;
+        
+        // should we publish an update?
+        float difference = fabs(newDeficitHours - pumpRunHoursDeficit);
+        
+        if (std::isnan(pumpRunHoursDeficit) || difference >= 0.1) {
+            runHoursDeficit->publish_state(newDeficitHours);
+            pumpRunHoursDeficit = newDeficitHours;
+        }
+    }
+    
     float CtoF(float centigrade) {
         return (centigrade * 1.8) + 32.0;
     }
@@ -604,29 +650,31 @@ public:
             return;     // can't do this without water temp
         }
 
-        static int prevTargetHours = 0;
-        int targetHours = 0;
+        float newTargetHrs = pumpHoursForWaterTempF(waterTempF);
         
-        // we have a valid water temp, choose the run time
-        if (waterTempF >= 90) {
-            targetHours = 11;
-        } else if (waterTempF >= 85) {
-            targetHours = 10;
-        } else if (waterTempF >= 80) {
-            targetHours = 9;
-        } else if (waterTempF >= 75) {
-            targetHours = 8;
-        } else if (waterTempF >= 70) {
-            targetHours = 7;
-        } else if (waterTempF >= 60) {
-            targetHours = 6;
-        } else {
-            targetHours = 5;
+        if (newTargetHrs != pumpTargetRunHours) {
+            targetRunHours->publish_state(newTargetHrs);
+            pumpTargetRunHours = newTargetHrs;
         }
-        
-        if (targetHours != prevTargetHours) {
-            id(pump_target_hours).publish_state(float(targetHours));
-            prevTargetHours = targetHours;
+    }
+    
+    float pumpHoursForWaterTempF(float waterTempF) {
+        if (waterTempF >= 95) {
+            return 12;      // 95+
+        } else if (waterTempF >= 90) {
+            return 11;      // 90-95
+        } else if (waterTempF >= 85) {
+            return 10;      // 85-90
+        } else if (waterTempF >= 80) {
+            return 9;       // 80-85
+        } else if (waterTempF >= 75) {
+            return 8;       // 75-80
+        } else if (waterTempF >= 70) {
+            return 7;       // 70-75
+        } else if (waterTempF >= 60) { 
+            return 6;       // 60-70
+        } else {
+            return 5;
         }
     }
     
