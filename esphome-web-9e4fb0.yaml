@@ -415,6 +415,10 @@ sensor:
       } else {
         return NAN;   // ignore reading, water not flowing in pipe
       }
+    filters:
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 5
     on_value:
       lambda: |-
         if (!std::isnan(x)) {
@@ -473,8 +477,7 @@ sensor:
       - 10000Ohm -> 25°C
       - 3602Ohm -> 50°C
     filters:
-      - lambda: |-
-            return x + 0.11;    // add 0.11 ºC based on calibration check
+      - offset: 0.11    # add 0.11 ºC based on calibration check
     on_value:
       then:
         - component.update: water_temperature

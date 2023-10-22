@@ -462,9 +462,9 @@ public:
         char str[255];
         
         if (source == PumpId && dest == CtlrId) {
-            strcpy(str, "<<<<< RS-485: P->C");
+            strcpy(str, "<<<<< RS-485: P-->C");
         } else if (source == CtlrId && dest == PumpId) {
-            strcpy(str, ">>>>> RS-485: C->P");
+            strcpy(str, ">>>>> RS-485: C-->P");
         } else {
             sprintf(str,"????? RS-485: x%02X->x%02X", source, dest);
         }
