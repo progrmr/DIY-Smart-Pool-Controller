@@ -1,7 +1,7 @@
 #include "esphome.h"
 
 #define MaxMsgData 255
-#define PumpPollIntervalMS 15000
+#define PumpPollIntervalMS 30000
 #define PumpId 0x60
 #define CtlrId 0x10
 #define InvalidAction 0xFF
@@ -62,10 +62,24 @@ public:
     //
     // RS-485 Message Actions (codes used by Intelliflo pump)
     //
-    enum MsgActions {
+    enum MsgActions : uint8_t {
         noAction = 0,
         requestSetSpeed = 1,
         requestStatus = 7,
+    };
+    
+    // specifies which of the "external programs" (stored in the pump settings)
+    // to be run.
+    enum MsgExternalPrograms : uint8_t {
+        noExtProg = 0,
+        extProg1 = 0x08,
+        extProg2 = 0x10,
+        extProg3 = 0x80,
+        extProg4 = 0x20,
+    };
+    
+    enum MsgPumpRegisters : uint16_t {
+        programRegister = 0x0321,
     };
     
     //
@@ -75,10 +89,10 @@ public:
         uint8_t dest;
         uint8_t source;
         uint8_t action;
-        uint8_t length;		// expected data length
-        uint8_t actualLen;		// actual received length
+        uint8_t length;		        // expected data length
+        uint8_t actualLen;		    // actual received length
         uint8_t data[MaxMsgData];	// received data
-        uint16_t checksum;		// expected checksum
+        uint16_t checksum;		    // expected checksum
         uint16_t actualChecksum;	// computed checksum
     }; 
     
@@ -86,9 +100,28 @@ public:
     const uint8_t msgDestination[2] = { PumpId, CtlrId };		// destination and source of message
     
     // format: action, length, data, CRChi, CRClo 
-    const uint8_t pumpStatusRequest[4] = { requestStatus, 0x00, 0x01, 0x1C };
-    const uint8_t pumpSolarSpeedOn [8] = { requestSetSpeed, 0x04, 0x03, 0x21, 0x00, 0x20, 0x01, 0x5E };
-    const uint8_t pumpSolarSpeedOff[8] = { requestSetSpeed, 0x04, 0x03, 0x21, 0x00, 0x00, 0x01, 0x3E };
+    const uint8_t pumpStatusRequest[4] = { 
+        requestStatus, 
+        0x00,       // number of data bytes to follow
+        0x01, 0x1C };
+    
+    const uint8_t pumpSolarSpeedOn [8] = { 
+        requestSetSpeed, 
+        0x04,        // number of data bytes to follow
+        (programRegister >> 8),     // programRegister MSB 0x03
+        (programRegister & 0xFF),   // programRegister LSB 0x21
+        0x00, 
+        extProg4, 
+        0x01, 0x5E };
+    
+    const uint8_t pumpSolarSpeedOff[8] = { 
+        requestSetSpeed, 
+        0x04,        // number of data bytes to follow
+        (programRegister >> 8),     // programRegister MSB 0x03
+        (programRegister & 0xFF),   // programRegister LSB 0x21
+        0x00, 
+        noExtProg, 
+        0x01, 0x3E };       // checksum
     
     bool shouldRequestSolarSpeedOn = false;
     bool shouldRequestSolarSpeedOff = false;
@@ -241,8 +274,14 @@ public:
                 //
                 if (msgState == msgComplete) {
                     // debug print out the message received
-                    printMessage(msg);
-                    
+                    printMessage(msg.source, 
+                                 msg.dest,
+                                 msg.action,
+                                 msg.length,
+                                 msg.data,
+                                 msg.checksum,
+                                 msg.actualChecksum);
+
                     // we received a complete reply message (or timed out)
                     switch (msg.action) {
                         case requestSetSpeed:
@@ -344,6 +383,14 @@ public:
         write_array(msgHeader, sizeof(msgHeader));
         write_array(msgDestination, sizeof(msgDestination));
         write_array(message, length);
+        
+        printMessage(msgDestination[1],         // source
+                     msgDestination[0],         // destination
+                     message[0],                // action
+                     message[1],                // length
+                     &message[2],               // data (if length > 0)
+                     0,                         // checksum (not used)
+                     0);                        // actualChecksum
     }
     
     //
@@ -407,46 +454,42 @@ public:
         return expectStart;		// invalid state, start over
     }
     
-    void printMessage(const Message msg) {
+    const void printMessage(uint8_t source, uint8_t dest, 
+                            uint8_t action, uint8_t length,
+                            const uint8_t* data,
+                            uint16_t checksum,
+                            uint16_t actualChecksum) {
         char str[255];
-        if (msg.source == PumpId && msg.dest == CtlrId) {
-            strcpy(str, "----- RS-485: Pump->Ctlr");
-        } else if (msg.source == CtlrId && msg.dest == PumpId) {
-            strcpy(str, "----- RS-485: Ctlr->Pump");
+        
+        if (source == PumpId && dest == CtlrId) {
+            strcpy(str, "<<<<< RS-485: P->C");
+        } else if (source == CtlrId && dest == PumpId) {
+            strcpy(str, ">>>>> RS-485: C->P");
         } else {
-            sprintf(str, "***** RS-485: x%02X->x%02X", msg.source, msg.dest);
+            sprintf(str,"????? RS-485: x%02X->x%02X", source, dest);
         }
         
-        switch (msg.action) {
-            case 1:  sprintf(str+strlen(str), " 1.Set Speed");        break;
-            case 2:  sprintf(str+strlen(str), " 2.Equip Status");     break;
-            case 4:  sprintf(str+strlen(str), " 4.Panel On/Off");     break;
-            case 5:  sprintf(str+strlen(str), " 5.Time Bcst");        break;
-            case 6:  sprintf(str+strlen(str), " 6.Pump On/Off");      break;
-            case 7:  sprintf(str+strlen(str), " 7.Status");           break;
-            case 9:  sprintf(str+strlen(str), " 9.Run @GPM");         break;
-            default: sprintf(str+strlen(str), " Action: %u(x%02X)", msg.action, msg.action);
+        char* nextP = str + strlen(str);
+        switch (action) {
+            case 1:  sprintf(nextP, " 1.SetSpeed");         break;
+            case 2:  sprintf(nextP, " 2.EquipStat");        break;
+            case 4:  sprintf(nextP, " 4.Panel On/Off");     break;
+            case 5:  sprintf(nextP, " 5.Time Bcst");        break;
+            case 6:  sprintf(nextP, " 6.Pump On/Off");      break;
+            case 7:  sprintf(nextP, " 7.Status");           break;
+            case 9:  sprintf(nextP, " 9.Run @GPM");         break;
+            default: sprintf(nextP, " Action: %u(x%02X)", action, action);
         }
-        sprintf(str + strlen(str), ", Len: %u ", msg.length);
+        sprintf(str+strlen(str), " (#%u)", length);
         
-        switch (msg.action) {
-            case requestStatus:      // pump status
-            case requestSetSpeed:    // pump speed
-                for (int i=0; i<msg.actualLen; i++) {
-                    sprintf(str+strlen(str), "%02X", msg.data[i]);
-                }
-                break;
-                
-            default:
-                for (int i = 0; i < msg.actualLen; ++i) {
-                    sprintf(str+strlen(str), " %02X", msg.data[i]);
-                }
+        for (int i=0; i<length; i++) {
+            sprintf(str+strlen(str), " %02X", data[i]);
         }
         
-        if (msg.checksum == msg.actualChecksum) {
+        if (checksum == actualChecksum) {
             sprintf(str+strlen(str), " (OK)");
         } else {
-            sprintf(str+strlen(str), " (x%04X != %04X) <<<ERR", msg.checksum, msg.actualChecksum);
+            sprintf(str+strlen(str), " (x%04X != %04X) <<<ERR", checksum, actualChecksum);
         }
         ESP_LOGD("custom", str);
     }
