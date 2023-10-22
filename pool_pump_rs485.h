@@ -22,6 +22,9 @@ public:
     
     Sensor* rpmSensor = new Sensor();		// pool pump RPM
     Sensor* wattsSensor = new Sensor();	    // pool pump power consumption
+    Sensor* flowSensor = new Sensor();      // pool pump flow rate gal/min
+    Sensor* powerSensor = new Sensor();     // pool pump % of max power
+    
     Sensor* runTimeSensor = new Sensor();   // today's total pump run time, in hours
     Sensor* targetRunHours = new Sensor();  // hours pump should run per day
     Sensor* runHoursDeficit = new Sensor(); // pump run hours deficit from past 2 days
@@ -79,7 +82,7 @@ public:
         uint16_t actualChecksum;	// computed checksum
     }; 
     
-    const uint8_t msgHeader[4] = { 0x00, 0xFF, 0xA5, 0x00 };	// starts a message transmittion
+    const uint8_t msgHeader[5] = { 0xFF, 0x00, 0xFF, 0xA5, 0x00 };	// starts a message transmittion
     const uint8_t msgDestination[2] = { PumpId, CtlrId };		// destination and source of message
     
     // format: action, length, data, CRChi, CRClo 
@@ -99,8 +102,10 @@ public:
     float pumpTargetRunHours = NAN;             // target hours per day to run the pump
     float pumpRunHoursDeficit = NAN;            // past 2 days hours deficit
     
-    uint16_t lastPumpRPM = 9999;
+    uint16_t lastPumpRPM   = 9999;
     uint16_t lastPumpWatts = 9999;
+    uint8_t  lastPumpFlow  = 255;
+    uint8_t  lastPumpPower = 255;
     
     // track pump startup time
     MilliSec msPumpStartTime = 0;        // millis() time of when pump started up
@@ -189,6 +194,9 @@ public:
                         if (msgSequenceState == waitStatusReply) {
                             rpmSensor->publish_state(NAN);
                             wattsSensor->publish_state(NAN);
+                            flowSensor->publish_state(NAN);
+                            powerSensor->publish_state(NAN);
+                            
                             // reset the total run time counter for this polling cycle
                             msLastPumpStatusReply = 0;
                         }
@@ -220,7 +228,7 @@ public:
                         msgState = gotMessageByte(byte, msgState, &msg);
                         msElapsed = millis() - msStart;
                         if (msElapsed >= 10) {
-                            ESP_LOGD("custom","***** WARNING: RS-485 read() + gotMB() took %lu ms", msElapsed);
+                            ESP_LOGD("custom","***** WARNING: RS-485 read()+gotMB() took %lu ms", msElapsed);
                             break;     // taking too long, continue on next loop() call
                         }
                     } else {
@@ -232,6 +240,9 @@ public:
                 // process the complete message
                 //
                 if (msgState == msgComplete) {
+                    // debug print out the message received
+                    printMessage(msg);
+                    
                     // we received a complete reply message (or timed out)
                     switch (msg.action) {
                         case requestSetSpeed:
@@ -241,37 +252,15 @@ public:
                             
                         case requestStatus:
                             // message won't be valid if we timed out earlier while waiting for it
-                            if (checkReceivedMessage(&msg)) {
-                                handlePumpStatusReply(&msg);
+                            if (isValidMessage(msg) && isDesiredMessage(msg)) {
+                                handlePumpStatusReply(msg);
                             }
-//                        {
-//                            // ********************  DEBUG CODE -- REMOVE AFTER TESTING
-//                            // ********************  DEBUG CODE -- REMOVE AFTER TESTING
-//                            // ********************  DEBUG CODE -- REMOVE AFTER TESTING
-//                            // ********************  DEBUG CODE -- REMOVE AFTER TESTING
-//                            auto sntp = id(local_sntp_time);
-//                            ESPTime time = sntp.now(); 
-//                            // https://github.com/esphome/esphome/blob/c77a9ad3630802376ab65d79d73d5663c79bf6a4/esphome/core/time.h
-//                            auto utc = sntp.utcnow();
-//                            std::string tz = sntp.get_timezone();
-//                            
-//                            int utcHour = utc.hour;
-//                            int utcMin = utc.minute;
-//                            
-//                            int hour = time.hour;
-//                            int minute = time.minute;
-//                            int second = time.second;
-//                            ESP_LOGD("custom","---------- TIME: %d-%d-%d %02d:%02d:%02d %02d:%02d (TZ: %s)", 
-//                                     time.year, time.month, time.day_of_month, 
-//                                     time.hour, time.minute, time.second, 
-//                                     utc.hour, utc.minute, 
-//                                     tz.c_str());
-//                        }
                             break;
                             
                         default:
-                            // invalid or not of interest message
-                            ESP_LOGD("custom","***** WARNING: unexpected RS-485 message received");
+//                            // invalid or not of interest message
+//                            ESP_LOGD("custom","***** WARNING: unexpected RS-485 message received");
+                            break;
                     }
                     
                     // we processed the message, transition to next state
@@ -411,58 +400,24 @@ public:
                 
             case expectChkL:
                 msg->checksum |= byte;
-                msg->actualChecksum = computeChecksum(msg);
+                msg->actualChecksum = checksumForMessage(*msg);
                 return msgComplete;
         }
         
         return expectStart;		// invalid state, start over
     }
     
-    //
-    // computeChecksum for message
-    // 
-    const uint16_t computeChecksum(const Message* msg) {
-        uint16_t result = 0xA5;
-        result += uint16_t(msg->dest);
-        result += uint16_t(msg->source);
-        result += uint16_t(msg->action);
-        result += uint16_t(msg->length);
-        
-        for (int i=0; i<msg->actualLen; i++) {
-            result += uint16_t(msg->data[i]);
-        } 
-        return result;
-    }
-    
-    //
-    // checkReceivedMessage -- checks (and debug prints) received RS-485 message 
-    // 
-    // Returns: true if message is valid and of interest
-    //
-    bool checkReceivedMessage(const Message* msg) {
-        if (msg->source == CtlrId && msg->dest == CtlrId && msg->action == InvalidAction) {
-            return false;           // this message has been zeroed out due to timeout error
-        }
-        
-        // ignore certain messages for now
-        switch (msg->action) {
-            case 2:
-            case 4:
-                return false;		// may be valid, but it's not of interest
-        }
-        
-        const bool msgValid = (msg->actualChecksum == msg->checksum);
-        
+    void printMessage(const Message msg) {
         char str[255];
-        if (msg->source == PumpId && msg->dest == CtlrId) {
+        if (msg.source == PumpId && msg.dest == CtlrId) {
             strcpy(str, "----- RS-485: Pump->Ctlr");
-        } else if (msg->source == CtlrId && msg->dest == PumpId) {
+        } else if (msg.source == CtlrId && msg.dest == PumpId) {
             strcpy(str, "----- RS-485: Ctlr->Pump");
         } else {
-            sprintf(str, "********** RS-485: %02X->%02X", msg->source, msg->dest);
+            sprintf(str, "***** RS-485: x%02X->x%02X", msg.source, msg.dest);
         }
         
-        switch (msg->action) {
+        switch (msg.action) {
             case 1:  sprintf(str+strlen(str), " 1.Set Speed");        break;
             case 2:  sprintf(str+strlen(str), " 2.Equip Status");     break;
             case 4:  sprintf(str+strlen(str), " 4.Panel On/Off");     break;
@@ -470,56 +425,106 @@ public:
             case 6:  sprintf(str+strlen(str), " 6.Pump On/Off");      break;
             case 7:  sprintf(str+strlen(str), " 7.Status");           break;
             case 9:  sprintf(str+strlen(str), " 9.Run @GPM");         break;
-            default: sprintf(str+strlen(str), " %u. (x%02X)", msg->action, msg->action);
+            default: sprintf(str+strlen(str), " Action: %u(x%02X)", msg.action, msg.action);
         }
-        sprintf(str + strlen(str), " #%u: ", msg->length);
+        sprintf(str + strlen(str), ", Len: %u ", msg.length);
         
-        switch (msg->action) {
-            case requestStatus:	// pump status
-            case requestSetSpeed:	// pump speed
-                for (int i=0; i<msg->actualLen; i++) {
-                    sprintf(str+strlen(str), "%02X", msg->data[i]);
+        switch (msg.action) {
+            case requestStatus:      // pump status
+            case requestSetSpeed:    // pump speed
+                for (int i=0; i<msg.actualLen; i++) {
+                    sprintf(str+strlen(str), "%02X", msg.data[i]);
                 }
                 break;
                 
             default:
-                for (int i = 0; i < msg->actualLen; ++i) {
-                    sprintf(str+strlen(str), " %02X", msg->data[i]);
+                for (int i = 0; i < msg.actualLen; ++i) {
+                    sprintf(str+strlen(str), " %02X", msg.data[i]);
                 }
         }
         
-        if (msgValid) {
+        if (msg.checksum == msg.actualChecksum) {
             sprintf(str+strlen(str), " (OK)");
         } else {
-            sprintf(str+strlen(str), " (x%04X != %04X) <<<ERR", msg->checksum, msg->actualChecksum);
+            sprintf(str+strlen(str), " (x%04X != %04X) <<<ERR", msg.checksum, msg.actualChecksum);
         }
         ESP_LOGD("custom", str);
+    }
+    
+    //
+    // computeChecksum for message
+    // 
+    const uint16_t checksumForMessage(const Message msg) {
+        uint16_t result = 0xA5;
+        result += uint16_t(msg.dest);
+        result += uint16_t(msg.source);
+        result += uint16_t(msg.action);
+        result += uint16_t(msg.length);
         
-        return msgValid;
+        for (int i=0; i<msg.actualLen; i++) {
+            result += uint16_t(msg.data[i]);
+        } 
+        return result;
+    }
+    
+    //
+    // isDesiredMessage -- checks received RS-485 messages for ones of interest
+    // 
+    // Returns: true if message is valid and of interest
+    //
+    bool isDesiredMessage(const Message msg) {
+        switch (msg.action) {
+            case 2:
+            case 4:
+                return false;		// may be valid, but it's not of interest
+            default: 
+                return true;        
+        }
+    }
+    
+    bool isValidMessage(const Message msg) {
+        if (msg.source == CtlrId && msg.dest == CtlrId && msg.action == InvalidAction) {
+            return false;           // this message has been zeroed out due to timeout error
+        }
+        
+        // verify checksum is correct
+        return msg.checksum == msg.actualChecksum;
     }
     
     //-----------------------------------------------------
     // handlePumpStatusReply - got status from pump
     //-----------------------------------------------------
-    void handlePumpStatusReply(const Message* msg) {
+    void handlePumpStatusReply(const Message msg) {
         //---------------------------
         // extract Pump RPM and Watts
         //---------------------------
-        float curPumpWatts = uint16_t((msg->data[3] << 8) | msg->data[4]);
-        float curPumpRPM   = uint16_t((msg->data[5] << 8) | msg->data[6]);
+        uint16_t curPumpWatts = uint16_t((msg.data[3] << 8) | msg.data[4]);
+        uint16_t curPumpRPM   = uint16_t((msg.data[5] << 8) | msg.data[6]);
+        uint8_t curPumpFlow  = msg.data[7];       // in gallons/minute
+        uint8_t curPumpPower = msg.data[8];       // percentage of max
         
         //---------------------------
         // publish RPM and Watts sensor data
         //---------------------------
-        if (fabs(curPumpRPM-lastPumpRPM) > 0.4) {
+        if (curPumpRPM != lastPumpRPM) {
             // RPM changed, publish an update
             rpmSensor->publish_state(curPumpRPM);
             lastPumpRPM = curPumpRPM;
         }
-        if (fabs(curPumpWatts-lastPumpWatts) >= 5) {
+        if (abs(curPumpWatts-lastPumpWatts) >= 5) {
             // Watts changed, publish an update
             wattsSensor->publish_state(curPumpWatts);
             lastPumpWatts = curPumpWatts;
+        }
+        if (curPumpFlow != lastPumpFlow) {
+            // Flow changed, publish an update
+            flowSensor->publish_state(curPumpFlow);
+            lastPumpFlow = curPumpFlow;
+        }
+        if (curPumpPower != lastPumpPower) {
+            // Power changed, publish an update
+            powerSensor->publish_state(curPumpPower);
+            lastPumpPower = curPumpPower;
         }
         
         //---------------------------

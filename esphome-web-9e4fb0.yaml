@@ -326,6 +326,8 @@ sensor:
       App.register_component(myPoolPump);
       return {myPoolPump->rpmSensor, 
               myPoolPump->wattsSensor, 
+              myPoolPump->flowSensor,
+              myPoolPump->powerSensor,
               myPoolPump->runTimeSensor,
               myPoolPump->targetRunHours,
               myPoolPump->runHoursDeficit}; 
@@ -337,6 +339,7 @@ sensor:
         unit_of_measurement: RPM
         state_class: "measurement"
         device_class: "speed"
+
         # WATTS - pump watt consumption now
       - name: "Watts Sensor"
         id: pump_watts_sensor
@@ -344,6 +347,20 @@ sensor:
         unit_of_measurement: W
         state_class: "measurement"
         device_class: "power"
+
+      - name: "Flow Sensor"
+        id: pump_flow_sensor
+        accuracy_decimals: 0
+        unit_of_measurement: GPM
+        state_class: "measurement"
+
+      - name: "Power Sensor"
+        id: pump_power_sensor
+        accuracy_decimals: 0
+        unit_of_measurement: "%"
+        state_class: "measurement"
+        device_class: "power_factor"
+
         # PUMP RUN HOURS - total number of hours pump has run today.  Hours
         # where pump is 2400 RPM get 100% credit, faster gets more hrs,
         # slow speeds get less hours.
@@ -353,6 +370,7 @@ sensor:
         unit_of_measurement: h
         state_class: "measurement"
         device_class: "duration"
+
         # PUMP TARGET HOURS 
         # This is the number of hours the pump should run per day to get
         # enough water filtration done.  Solar and non-solar hours count.
@@ -362,6 +380,7 @@ sensor:
         unit_of_measurement: h
         state_class: "measurement"
         device_class: "duration"
+
       - name: "Pump Hours Deficit"
         id: pump_hours_deficit
         accuracy_decimals: 1
@@ -370,45 +389,32 @@ sensor:
         device_class: "duration"
 
 #----------------------------------------------------------------------
-# SOLAR PANEL TEMPERATURE
+# WATER TEMPERATURE
 #
-# Solar Panel Thermistor sensor is located on the roof solar panels and
-# is used to determine if it is hot enough to heat the pool water.
-# https://esphome.io/components/sensor/ntc
-#----------------------------------------------------------------------
-  - platform: ntc
-    name: Panel Temperature
-    id: panel_temperature
-    sensor: panel_thermistor
-    calibration:
-      - 15310Ohm -> 16°C
-      - 10000Ohm -> 25°C
-      - 3602Ohm -> 50°C
-    filters:
-      - offset: 0.6
-      - sliding_window_moving_average:
-          window_size: 5
-          send_every: 5
-
-#----------------------------------------------------------------------
-# WATER TEMPERATURE NTC
-#
-# Water Temperature NTC sensor is located in a pipe right next to the pump
-# output and it used to measure pool water temperature.  This temperature 
+# Water Temperature uses the Pipe Temperature NTC below.  The pipe 
+# temperature 
 # reading is NOT valid if the pump is off since water is not flowing 
 # through the pipe and can cool off or heat up while sitting in the pipe.
-# Better to use skimmer water temperature if pump is not running.
-# This temperature is used to update the min/max temperatures above.
-# https://esphome.io/components/sensor/ntc
+# The lambda checks if the pump is running before considering the 
+# pipe temp to be a
+# valid water temperature.
+# This temperature is used to update the min/max temperatures.
+# https://esphome.io/components/sensor/template.html
 #----------------------------------------------------------------------
-  - platform: ntc
+  - platform: template
     name: Water Temperature
     id: water_temperature
-    sensor: water_thermistor
-    calibration:
-      - 15310Ohm -> 16°C
-      - 10000Ohm -> 25°C
-      - 3602Ohm -> 50°C
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 1
+    update_interval: never
+    lambda: |-
+      if (PoolPumpRS485::instance->isPipeTempValid()) {
+        return id(pipe_temperature).state;
+      } else {
+        return NAN;   // ignore reading, water not flowing in pipe
+      }
     on_value:
       lambda: |-
         if (!std::isnan(x)) {
@@ -423,16 +429,6 @@ sensor:
               maxTemp->publish_state(x);
             }
         }
-    filters:
-      - lambda: |-
-          if (PoolPumpRS485::instance->isPipeTempValid()) {
-            return x + 0.11;    // add 0.11 based on calibration check
-          } else {
-            return NAN;   // ignore reading, water not flowing in pipe
-          }
-      - sliding_window_moving_average:
-          window_size: 5
-          send_every: 5
 
 # Water Temp Daily Minimum/Maximum sensor
 # https://esphome.io/components/sensor/template.html
@@ -459,6 +455,50 @@ sensor:
     # (1) midnight (resets min from current) in the time sntp above, 
     # (2) whenever the water_temperature sensor updates.
     update_interval: never
+
+#----------------------------------------------------------------------
+# PIPE TEMPERATURE NTC
+#
+# Pipe Temperature NTC sensor is located in a pipe right next to the pump
+# output and it used to measure pool water temperature.
+#
+# https://esphome.io/components/sensor/ntc
+#----------------------------------------------------------------------
+  - platform: ntc
+    name: Pipe Temperature
+    id: pipe_temperature
+    sensor: water_thermistor
+    calibration:
+      - 15310Ohm -> 16°C
+      - 10000Ohm -> 25°C
+      - 3602Ohm -> 50°C
+    filters:
+      - lambda: |-
+            return x + 0.11;    // add 0.11 ºC based on calibration check
+    on_value:
+      then:
+        - component.update: water_temperature
+
+#----------------------------------------------------------------------
+# SOLAR PANEL TEMPERATURE NTC
+#
+# Solar Panel Thermistor sensor is located on the roof solar panels and
+# is used to determine if it is hot enough to heat the pool water.
+# https://esphome.io/components/sensor/ntc
+#----------------------------------------------------------------------
+  - platform: ntc
+    name: Panel Temperature
+    id: panel_temperature
+    sensor: panel_thermistor
+    calibration:
+      - 15310Ohm -> 16°C
+      - 10000Ohm -> 25°C
+      - 3602Ohm -> 50°C
+    filters:
+      - offset: 0.6
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 5
 
 #----------------------------------------------------------------------
 # RESISTANCE SENSORS for thermistor's voltage dividors
@@ -498,7 +538,7 @@ sensor:
     id: panel_thermistor_adc
     pin: GPIO33
     name: Panel Thermistor ADC
-    update_interval: 61s    
+    update_interval: 60s    
     attenuation: 11db
     filters:
       - offset: -0.02
@@ -508,7 +548,7 @@ sensor:
     id: water_thermistor_adc
     pin: GPIO32
     name: Water Thermistor ADC
-    update_interval: 59s    
+    update_interval: 60s    
     attenuation: 11db
     filters:
       - offset: -0.02
@@ -641,7 +681,7 @@ time:
               // at midnight, reset pump run time to 0
               PoolPumpRS485::instance->resetTotalPumpRunTime();
               
-              // at midnight, reset min/max to current temp
-              float temp = id(water_temperature)->state;
-              id(minimum_water_temperature)->publish_state(temp);
-              id(maximum_water_temperature)->publish_state(temp);
+              // at midnight, reset min/max to current waterTemp
+              const float waterTemp = id(water_temperature)->state;
+              id(minimum_water_temperature)->publish_state(waterTemp);
+              id(maximum_water_temperature)->publish_state(waterTemp);
