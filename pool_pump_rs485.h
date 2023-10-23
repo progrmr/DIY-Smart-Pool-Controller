@@ -2,9 +2,6 @@
 
 #define MaxMsgData 255
 #define PumpPollIntervalMS 30000
-#define PumpId 0x60
-#define CtlrId 0x10
-#define InvalidAction 0xFF
 #define ReplyTimeOutMS 1000
 #define MinPumpSpeed 0
 #define MaxPumpSpeed 3000
@@ -59,13 +56,27 @@ public:
         msgComplete	
     };
     
-    //
+    enum MsgPrefixes : uint8_t {
+        mPrefixA5 = 0xA5,               // marks begin of message
+        mProtocolRev0 = 0x00,            // protocol version?
+    };
+    
+    // RS-485 Message source and destination ids
+    enum MsgDeviceIds : uint8_t {
+        PumpId = 0x60,
+        CtlrId = 0x10,
+    };
+    
     // RS-485 Message Actions (codes used by Intelliflo pump)
-    //
     enum MsgActions : uint8_t {
         noAction = 0,
         requestSetSpeed = 1,
+        lockDisplay = 4,
+        requestMode = 5,
+        turnOnOff = 6,
         requestStatus = 7,
+        runAtGPM = 9,
+        invalidAction = 0xFF,
     };
     
     // specifies which of the "external programs" (stored in the pump settings)
@@ -83,12 +94,14 @@ public:
     };
     
     //
-    // RS-485 Message Data Structure, not including header
+    // RS-485 Message Data Structure, not including preamble (FF 00 FF)
     //
     struct Message {
-        uint8_t dest;
-        uint8_t source;
-        uint8_t action;
+        uint8_t prefix;             // marks message start (always 0xA5)
+        uint8_t protocolRev;        // protocol version (always 0 for my pump)
+        MsgDeviceIds dest;          // message destination
+        MsgDeviceIds source;        // message source
+        MsgActions action;
         uint8_t length;		        // expected data length
         uint8_t actualLen;		    // actual received length
         uint8_t data[MaxMsgData];	// received data
@@ -96,14 +109,19 @@ public:
         uint16_t actualChecksum;	// computed checksum
     }; 
     
-    const uint8_t msgHeader[5] = { 0xFF, 0x00, 0xFF, 0xA5, 0x00 };	// starts a message transmittion
-    const uint8_t msgDestination[2] = { PumpId, CtlrId };		// destination and source of message
+    const uint8_t msgPreamble[3] = { 0xFF, 0x00, 0xFF };         // preamble before a message 
+    const uint8_t msgPrefix[2] = { mPrefixA5, mProtocolRev0 };   // starts a message transmittion
+    const uint8_t msgDestSource[2] = { PumpId, CtlrId };		 // destination and source of message
     
     // format: action, length, data, CRChi, CRClo 
     const uint8_t pumpStatusRequest[4] = { 
         requestStatus, 
         0x00,       // number of data bytes to follow
         0x01, 0x1C };
+    
+    const Message mPumpStatusRequest = {
+        mPrefixA5,
+    };
     
     const uint8_t pumpSolarSpeedOn [8] = { 
         requestSetSpeed, 
@@ -237,7 +255,7 @@ public:
                         ESP_LOGD("custom","***** WARNING: timed out waiting for RS-485 message (seq:%d)", msgSequenceState);
                         msg.source = CtlrId;
                         msg.dest   = CtlrId;
-                        msg.action = InvalidAction;     // force it to fail the check later
+                        msg.action = invalidAction;     // force it to fail the check later
                         msg.checksum = 0;
                     }
                 }
@@ -291,7 +309,7 @@ public:
                             
                         case requestStatus:
                             // message won't be valid if we timed out earlier while waiting for it
-                            if (isValidMessage(msg) && isDesiredMessage(msg)) {
+                            if (isValidMessage(msg) && msg.action == requestStatus) {
                                 handlePumpStatusReply(msg);
                             }
                             break;
@@ -380,12 +398,15 @@ public:
     // sendMessage -- send message via RS-485 serial to the pump
     //
     const void sendMessage(const uint8_t* message, const size_t length) {
-        write_array(msgHeader, sizeof(msgHeader));
-        write_array(msgDestination, sizeof(msgDestination));
+        // send data to the UART for RS-485 transmission to pump
+        write_array(msgPreamble, sizeof(msgPreamble));
+        write_array(msgPrefix, sizeof(msgPrefix));
+        
+        write_array(msgDestSource, sizeof(msgDestSource));
         write_array(message, length);
         
-        printMessage(msgDestination[1],         // source
-                     msgDestination[0],         // destination
+        printMessage(msgDestSource[1],         // source
+                     msgDestSource[0],         // destination
                      message[0],                // action
                      message[1],                // length
                      &message[2],               // data (if length > 0)
@@ -399,30 +420,45 @@ public:
     const MsgStates gotMessageByte(const uint8_t byte, const MsgStates msgState, Message* msg) {
         switch (msgState) {
             case expectStart:
-                return (byte == 0xff) ? expectA5 : expectStart;
+                if (byte == 0xFF) {
+                    return expectA5;
+                }
+                return expectStart;
                 
             case expectA5:
-                return (byte == 0xa5) ? expect00 : expectStart;
+                if (byte == mPrefixA5) {
+                    // we got the prefix of a message, zero out the 
+                    // previous message in the buffer and start new
+                    std::memset(msg, 0, sizeof(Message));
+                    
+                    msg->prefix = mPrefixA5;
+                    return expect00;
+                }
+                return expectStart;
                 
             case expect00:
-                return (byte == 0x00) ? expectDst : expectStart;
+                if (byte == mProtocolRev0) {
+                    msg->protocolRev = mProtocolRev0;
+                    return expectDst;
+                }
+                return expectStart;
                 
             case expectDst:
                 if (byte == PumpId || byte == CtlrId) {
-                    msg->dest = byte;
+                    msg->dest = static_cast<MsgDeviceIds>(byte);
                     return expectSrc;
                 }
                 break;
                 
             case expectSrc:
                 if (byte == PumpId || byte == CtlrId) {
-                    msg->source = byte;
+                    msg->source = static_cast<MsgDeviceIds>(byte);
                     return expectCmd;
                 }
                 break;
                 
             case expectCmd:
-                msg->action = byte;
+                msg->action = static_cast<MsgActions>(byte);
                 return expectLen;
                 
             case expectLen:
@@ -452,6 +488,31 @@ public:
         }
         
         return expectStart;		// invalid state, start over
+    }
+    
+    Message makeMessage(MsgDeviceIds source,
+                        MsgDeviceIds dest,
+                        MsgActions action,
+                        uint8_t length,
+                        const uint8_t* data) {
+        Message msg;
+        std::memset(&msg, 0, sizeof(msg));
+        
+        msg.prefix = mPrefixA5;
+        msg.protocolRev = mProtocolRev0;
+        msg.dest   = dest;
+        msg.source = source;
+        msg.action = action;
+        msg.length = length;
+        msg.actualLen = length;
+        
+        for (int i=0; i<length; i++) {
+            msg.data[i] = data[i];
+        }
+        
+        msg.checksum = checksumForMessage(msg);
+        msg.actualChecksum = msg.checksum;
+        return msg;
     }
     
     const void printMessage(uint8_t source, uint8_t dest, 
@@ -487,9 +548,9 @@ public:
         }
         
         if (checksum == actualChecksum) {
-            sprintf(str+strlen(str), " (OK)");
+            sprintf(str+strlen(str), " (x%04X) ✅", checksum);
         } else {
-            sprintf(str+strlen(str), " (x%04X != %04X) <<<ERR", checksum, actualChecksum);
+            sprintf(str+strlen(str), " (x%04X != %04X) ⛔️ERR", checksum, actualChecksum);
         }
         ESP_LOGD("custom", str);
     }
@@ -498,35 +559,21 @@ public:
     // computeChecksum for message
     // 
     const uint16_t checksumForMessage(const Message msg) {
-        uint16_t result = 0xA5;
-        result += uint16_t(msg.dest);
-        result += uint16_t(msg.source);
-        result += uint16_t(msg.action);
-        result += uint16_t(msg.length);
+        uint16_t checksum = msg.prefix;
+        checksum += uint16_t(msg.protocolRev);
+        checksum += uint16_t(msg.dest);
+        checksum += uint16_t(msg.source);
+        checksum += uint16_t(msg.action);
+        checksum += uint16_t(msg.length);
         
-        for (int i=0; i<msg.actualLen; i++) {
-            result += uint16_t(msg.data[i]);
+        for (int i=0; i<msg.length; i++) {
+            checksum += uint16_t(msg.data[i]);
         } 
-        return result;
-    }
-    
-    //
-    // isDesiredMessage -- checks received RS-485 messages for ones of interest
-    // 
-    // Returns: true if message is valid and of interest
-    //
-    bool isDesiredMessage(const Message msg) {
-        switch (msg.action) {
-            case 2:
-            case 4:
-                return false;		// may be valid, but it's not of interest
-            default: 
-                return true;        
-        }
+        return checksum;
     }
     
     bool isValidMessage(const Message msg) {
-        if (msg.source == CtlrId && msg.dest == CtlrId && msg.action == InvalidAction) {
+        if (msg.source == CtlrId && msg.dest == CtlrId && msg.action == invalidAction) {
             return false;           // this message has been zeroed out due to timeout error
         }
         
@@ -740,10 +787,12 @@ public:
     void printDebugInfo() {
         char str[256] = {0};
         for (int i=0; i<NDaysPumpHistory; i++) {
-            sprintf(str+strlen(str), "%0.1f ", pumpRunHours[i]);
+            sprintf(str+strlen(str), "%0.3f ", pumpRunHours[i]);
         }
         ESP_LOGD("custom","----- Pump hours/day: %s", str);
     }
+    
+
 };
 
 PoolPumpRS485* PoolPumpRS485::instance = 0;
