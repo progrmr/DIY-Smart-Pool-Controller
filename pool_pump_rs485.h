@@ -114,11 +114,6 @@ public:
     const uint8_t msgDestSource[2] = { PumpId, CtlrId };		 // destination and source of message
     
     // format: action, length, data, CRChi, CRClo 
-    const uint8_t pumpStatusRequest[4] = { 
-        requestStatus, 
-        0x00,       // number of data bytes to follow
-        0x01, 0x1C };
-    
     const Message mPumpStatusRequest = {
         mPrefixA5,
     };
@@ -226,7 +221,9 @@ public:
                 
             case sendStatusRequest:
                 // transmit a pump status request via RS-485 serial
-                sendMessage(pumpStatusRequest, sizeof(pumpStatusRequest));
+                const auto msg = makeMessage(requestStatus, 0, NULL);
+                sendMessage(msg);
+                
                 msgState = expectStart;
                 msgSequenceState = waitStatusReply;
                 msReplyWaitStart = msNow;
@@ -397,6 +394,32 @@ public:
     //
     // sendMessage -- send message via RS-485 serial to the pump
     //
+    const void sendMessage(const Message msg) {
+        // send data to the UART for RS-485 transmission to pump
+        write_array(msgPreamble, sizeof(msgPreamble));
+        write(msg.prefix);
+        write(msg.protocolRev);
+        write(msg.dest);
+        write(msg.source);
+        write(msg.action);
+        write(msg.length);
+        
+        if (msg.length > 0) {
+            write_array(msg.data, msg.length);
+        }
+        
+        write(msg.checksum >> 8);       // MSB
+        write(msg.checksum & 0xFF);     // LSB
+        
+        printMessage(msg.dest,          // source
+                     msg.source,        // destination
+                     msg.action,        // action
+                     msg.length,        // length
+                     msg.data,          // data (if length > 0)
+                     msg.checksum,      // checksum (not used)
+                     msg.actualChecksum);
+    }
+
     const void sendMessage(const uint8_t* message, const size_t length) {
         // send data to the UART for RS-485 transmission to pump
         write_array(msgPreamble, sizeof(msgPreamble));
@@ -490,9 +513,7 @@ public:
         return expectStart;		// invalid state, start over
     }
     
-    Message makeMessage(MsgDeviceIds source,
-                        MsgDeviceIds dest,
-                        MsgActions action,
+    Message makeMessage(MsgActions action,
                         uint8_t length,
                         const uint8_t* data) {
         Message msg;
@@ -500,8 +521,8 @@ public:
         
         msg.prefix = mPrefixA5;
         msg.protocolRev = mProtocolRev0;
-        msg.dest   = dest;
-        msg.source = source;
+        msg.dest   = PumpId;        // we only make messages to the pump
+        msg.source = CtlrId;        // we only make messages we send
         msg.action = action;
         msg.length = length;
         msg.actualLen = length;
