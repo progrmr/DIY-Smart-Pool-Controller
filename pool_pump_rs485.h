@@ -118,23 +118,17 @@ public:
         mPrefixA5,
     };
     
-    const uint8_t pumpSolarSpeedOn [8] = { 
-        requestSetSpeed, 
-        0x04,        // number of data bytes to follow
-        (programRegister >> 8),     // programRegister MSB 0x03
-        (programRegister & 0xFF),   // programRegister LSB 0x21
+    const uint8_t pumpExtProg4On[4] = { 
+        (programRegister >> 8),     // programRegister MSB
+        (programRegister & 0xFF),   // programRegister LSB
         0x00, 
-        extProg4, 
-        0x01, 0x5E };
+        extProg4 };                 // turns on external program 4
     
-    const uint8_t pumpSolarSpeedOff[8] = { 
-        requestSetSpeed, 
-        0x04,        // number of data bytes to follow
+    const uint8_t pumpExtProg4Off[4] = { 
         (programRegister >> 8),     // programRegister MSB 0x03
         (programRegister & 0xFF),   // programRegister LSB 0x21
         0x00, 
-        noExtProg, 
-        0x01, 0x3E };       // checksum
+        noExtProg };                // turns off any external program running
     
     bool shouldRequestSolarSpeedOn = false;
     bool shouldRequestSolarSpeedOff = false;
@@ -198,7 +192,11 @@ public:
             case sendSolarSpeedOn:
                 if (shouldRequestSolarSpeedOn) {
                     // transmit a request for pump to switch on to solar speed
-                    sendMessage(pumpSolarSpeedOn, sizeof(pumpSolarSpeedOn));
+                    const auto msg = makeMessage(requestSetSpeed, 
+                                                 sizeof(pumpExtProg4On), 
+                                                 pumpExtProg4On);
+                    sendMessage(msg);
+                    
                     msgState = expectStart;
                     msgSequenceState = waitSolarSpeedOn;
                     msReplyWaitStart = msNow;
@@ -210,7 +208,11 @@ public:
             case sendSolarSpeedOff:
                 if (shouldRequestSolarSpeedOff) {
                     // transmit a request for pump to switch off solar speed
-                    sendMessage(pumpSolarSpeedOff, sizeof(pumpSolarSpeedOff));
+                    const auto msg = makeMessage(requestSetSpeed, 
+                                                 sizeof(pumpExtProg4On), 
+                                                 pumpExtProg4Off);
+                    sendMessage(msg);
+                    
                     msgState = expectStart;
                     msgSequenceState = waitSolarSpeedOff;
                     msReplyWaitStart = msNow;
@@ -221,9 +223,8 @@ public:
                 
             case sendStatusRequest:
                 // transmit a pump status request via RS-485 serial
-                const auto msg = makeMessage(requestStatus, 0, NULL);
-                sendMessage(msg);
-                
+                sendMessage( makeMessage(requestStatus, 0, NULL) );
+
                 msgState = expectStart;
                 msgSequenceState = waitStatusReply;
                 msReplyWaitStart = msNow;
@@ -392,52 +393,6 @@ public:
     }
     
     //
-    // sendMessage -- send message via RS-485 serial to the pump
-    //
-    const void sendMessage(const Message msg) {
-        // send data to the UART for RS-485 transmission to pump
-        write_array(msgPreamble, sizeof(msgPreamble));
-        write(msg.prefix);
-        write(msg.protocolRev);
-        write(msg.dest);
-        write(msg.source);
-        write(msg.action);
-        write(msg.length);
-        
-        if (msg.length > 0) {
-            write_array(msg.data, msg.length);
-        }
-        
-        write(msg.checksum >> 8);       // MSB
-        write(msg.checksum & 0xFF);     // LSB
-        
-        printMessage(msg.dest,          // source
-                     msg.source,        // destination
-                     msg.action,        // action
-                     msg.length,        // length
-                     msg.data,          // data (if length > 0)
-                     msg.checksum,      // checksum (not used)
-                     msg.actualChecksum);
-    }
-
-    const void sendMessage(const uint8_t* message, const size_t length) {
-        // send data to the UART for RS-485 transmission to pump
-        write_array(msgPreamble, sizeof(msgPreamble));
-        write_array(msgPrefix, sizeof(msgPrefix));
-        
-        write_array(msgDestSource, sizeof(msgDestSource));
-        write_array(message, length);
-        
-        printMessage(msgDestSource[1],         // source
-                     msgDestSource[0],         // destination
-                     message[0],                // action
-                     message[1],                // length
-                     &message[2],               // data (if length > 0)
-                     0,                         // checksum (not used)
-                     0);                        // actualChecksum
-    }
-    
-    //
     // gotMessageByte -- updates received message data according to state
     //
     const MsgStates gotMessageByte(const uint8_t byte, const MsgStates msgState, Message* msg) {
@@ -536,6 +491,35 @@ public:
         return msg;
     }
     
+    //
+    // sendMessage -- send message via RS-485 serial to the pump
+    //
+    const void sendMessage(const Message msg) {
+        // send data to the UART for RS-485 transmission to pump
+        write_array(msgPreamble, sizeof(msgPreamble));
+        write(msg.prefix);
+        write(msg.protocolRev);
+        write(msg.dest);
+        write(msg.source);
+        write(msg.action);
+        write(msg.length);
+        
+        if (msg.length > 0) {
+            write_array(msg.data, msg.length);
+        }
+        
+        write(msg.checksum >> 8);       // MSB
+        write(msg.checksum & 0xFF);     // LSB
+        
+        printMessage(msg.dest,          // source
+                     msg.source,        // destination
+                     msg.action,        // action
+                     msg.length,        // length
+                     msg.data,          // data (if length > 0)
+                     msg.checksum,      // checksum (not used)
+                     msg.actualChecksum);
+    }
+
     const void printMessage(uint8_t source, uint8_t dest, 
                             uint8_t action, uint8_t length,
                             const uint8_t* data,
