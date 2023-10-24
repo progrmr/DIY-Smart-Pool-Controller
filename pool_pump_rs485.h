@@ -70,11 +70,12 @@ public:
     // RS-485 Message Actions (codes used by Intelliflo pump)
     enum MsgActions : uint8_t {
         noAction = 0,
-        requestSetSpeed = 1,
+        rqstSetSpeed = 1,
+        rqstEquipStatus = 2,
         lockDisplay = 4,
-        requestMode = 5,
+        rqstMode = 5,
         turnOnOff = 6,
-        requestStatus = 7,
+        rqstStatus = 7,
         runAtGPM = 9,
         invalidAction = 0xFF,
     };
@@ -97,8 +98,8 @@ public:
     // RS-485 Message Data Structure, not including preamble (FF 00 FF)
     //
     struct Message {
-        uint8_t prefix;             // marks message start (always 0xA5)
-        uint8_t protocolRev;        // protocol version (always 0 for my pump)
+        MsgPrefixes prefix;         // marks message start (always 0xA5)
+        MsgPrefixes protocolRev;    // protocol version (always 0 for my pump)
         MsgDeviceIds dest;          // message destination
         MsgDeviceIds source;        // message source
         MsgActions action;
@@ -109,15 +110,11 @@ public:
         uint16_t actualChecksum;	// computed checksum
     }; 
     
-    const uint8_t msgPreamble[3] = { 0xFF, 0x00, 0xFF };         // preamble before a message 
-    const uint8_t msgPrefix[2] = { mPrefixA5, mProtocolRev0 };   // starts a message transmittion
-    const uint8_t msgDestSource[2] = { PumpId, CtlrId };		 // destination and source of message
+    const uint8_t msgPreamble[3] = { 0xFF, 0x00, 0xFF };             // preamble before a message 
+    const MsgPrefixes msgPrefix[2] = { mPrefixA5, mProtocolRev0 };   // starts a message transmittion
+    const MsgDeviceIds msgDestSource[2] = { PumpId, CtlrId };		 // destination and source of message
     
-    // format: action, length, data, CRChi, CRClo 
-    const Message mPumpStatusRequest = {
-        mPrefixA5,
-    };
-    
+    // These messages hold the data portion of the Message struct 
     const uint8_t pumpExtProg4On[4] = { 
         (programRegister >> 8),     // programRegister MSB
         (programRegister & 0xFF),   // programRegister LSB
@@ -135,9 +132,9 @@ public:
     long pumpSpeedRequested = 0;
     
     MilliSec msLastPumpPoll = 0;                // track time between polling for status
-    
     MilliSec msLastPumpStatusReply = 0;         // tracks total pump run time for this polling cycle
-    float hrsTotalRunTimeToday = 0;             // hours of total run time today
+    MilliSec msPumpStartTime = 0;               // millis() time of when pump started
+
     float pumpRunHours[NDaysPumpHistory];       // past history of run time, hrs per day, [0]==today
     float pumpTargetRunHours = NAN;             // target hours per day to run the pump
     float pumpRunHoursDeficit = NAN;            // past 2 days hours deficit
@@ -146,9 +143,6 @@ public:
     uint16_t lastPumpWatts = 9999;
     uint8_t  lastPumpFlow  = 255;
     uint8_t  lastPumpPower = 255;
-    
-    // track pump startup time
-    MilliSec msPumpStartTime = 0;        // millis() time of when pump started up
     
     // 
     // setup() -- one time setup
@@ -192,11 +186,12 @@ public:
             case sendSolarSpeedOn:
                 if (shouldRequestSolarSpeedOn) {
                     // transmit a request for pump to switch on to solar speed
-                    const auto msg = makeMessage(requestSetSpeed, 
+                    const auto msg = makeMessage(rqstSetSpeed, 
                                                  sizeof(pumpExtProg4On), 
                                                  pumpExtProg4On);
+                    printMessage(msg);
                     sendMessage(msg);
-                    
+
                     msgState = expectStart;
                     msgSequenceState = waitSolarSpeedOn;
                     msReplyWaitStart = msNow;
@@ -208,11 +203,12 @@ public:
             case sendSolarSpeedOff:
                 if (shouldRequestSolarSpeedOff) {
                     // transmit a request for pump to switch off solar speed
-                    const auto msg = makeMessage(requestSetSpeed, 
+                    const auto msg = makeMessage(rqstSetSpeed, 
                                                  sizeof(pumpExtProg4On), 
                                                  pumpExtProg4Off);
+                    printMessage(msg);
                     sendMessage(msg);
-                    
+
                     msgState = expectStart;
                     msgSequenceState = waitSolarSpeedOff;
                     msReplyWaitStart = msNow;
@@ -223,7 +219,7 @@ public:
                 
             case sendStatusRequest:
                 // transmit a pump status request via RS-485 serial
-                sendMessage( makeMessage(requestStatus, 0, NULL) );
+                sendMessage( makeMessage(rqstStatus, 0, NULL) );
 
                 msgState = expectStart;
                 msgSequenceState = waitStatusReply;
@@ -290,31 +286,25 @@ public:
                 //
                 if (msgState == msgComplete) {
                     // debug print out the message received
-                    printMessage(msg.source, 
-                                 msg.dest,
-                                 msg.action,
-                                 msg.length,
-                                 msg.data,
-                                 msg.checksum,
-                                 msg.actualChecksum);
+                    printMessage(msg);
 
                     // we received a complete reply message (or timed out)
                     switch (msg.action) {
-                        case requestSetSpeed:
+                        case rqstSetSpeed:
                             // NOT IMPLEMENTED YET -- verify the pump did what we requested, 
                             // if it didn't there's not much we can do just report errors
                             break;
                             
-                        case requestStatus:
+                        case rqstStatus:
                             // message won't be valid if we timed out earlier while waiting for it
-                            if (isValidMessage(msg) && msg.action == requestStatus) {
+                            if (isValidMessage(msg) && msg.action == rqstStatus) {
                                 handlePumpStatusReply(msg);
                             }
                             break;
                             
                         default:
-//                            // invalid or not of interest message
-//                            ESP_LOGD("custom","***** WARNING: unexpected RS-485 message received");
+                            // invalid or not of interest message
+                            ESP_LOGD("custom","***** WARNING: unexpected RS-485 message received");
                             break;
                     }
                     
@@ -449,7 +439,6 @@ public:
                 if (msg->actualLen > msg->length || msg->actualLen >= MaxMsgData) {
                     return expectStart;		// invalid length, start over
                 }
-                
                 msg->data[msg->actualLen++] = byte;
                 
                 // if got all the data bytes, checksum next
@@ -477,10 +466,10 @@ public:
         msg.prefix = mPrefixA5;
         msg.protocolRev = mProtocolRev0;
         msg.dest   = PumpId;        // we only make messages to the pump
-        msg.source = CtlrId;        // we only make messages we send
+        msg.source = CtlrId;        // we only make messages for the controller
         msg.action = action;
         msg.length = length;
-        msg.actualLen = length;
+        msg.actualLen = length;     // may be 0 
         
         for (int i=0; i<length; i++) {
             msg.data[i] = data[i];
@@ -497,6 +486,7 @@ public:
     const void sendMessage(const Message msg) {
         // send data to the UART for RS-485 transmission to pump
         write_array(msgPreamble, sizeof(msgPreamble));
+        
         write(msg.prefix);
         write(msg.protocolRev);
         write(msg.dest);
@@ -510,52 +500,48 @@ public:
         
         write(msg.checksum >> 8);       // MSB
         write(msg.checksum & 0xFF);     // LSB
-        
-        printMessage(msg.dest,          // source
-                     msg.source,        // destination
-                     msg.action,        // action
-                     msg.length,        // length
-                     msg.data,          // data (if length > 0)
-                     msg.checksum,      // checksum (not used)
-                     msg.actualChecksum);
     }
 
-    const void printMessage(uint8_t source, uint8_t dest, 
-                            uint8_t action, uint8_t length,
-                            const uint8_t* data,
-                            uint16_t checksum,
-                            uint16_t actualChecksum) {
+    const void printMessage(const Message msg) {
         char str[255];
         
-        if (source == PumpId && dest == CtlrId) {
+        if (msg.source == PumpId && msg.dest == CtlrId) {
             strcpy(str, "<<<<< RS-485: P-->C");
-        } else if (source == CtlrId && dest == PumpId) {
+        } else if (msg.source == CtlrId && msg.dest == PumpId) {
             strcpy(str, ">>>>> RS-485: C-->P");
         } else {
-            sprintf(str,"????? RS-485: x%02X->x%02X", source, dest);
+            sprintf(str,"????? RS-485: x%02X->x%02X", msg.source, msg.dest);
         }
         
         char* nextP = str + strlen(str);
-        switch (action) {
-            case 1:  sprintf(nextP, " 1.SetSpeed");         break;
-            case 2:  sprintf(nextP, " 2.EquipStat");        break;
-            case 4:  sprintf(nextP, " 4.Panel On/Off");     break;
-            case 5:  sprintf(nextP, " 5.Time Bcst");        break;
-            case 6:  sprintf(nextP, " 6.Pump On/Off");      break;
-            case 7:  sprintf(nextP, " 7.Status");           break;
-            case 9:  sprintf(nextP, " 9.Run @GPM");         break;
-            default: sprintf(nextP, " Action: %u(x%02X)", action, action);
+        switch (msg.action) {
+            case rqstSetSpeed:  
+                sprintf(nextP, " 1.SetSpeed");         break;
+            case rqstEquipStatus:  
+                sprintf(nextP, " 2.EquipStat");        break;
+            case lockDisplay:  
+                sprintf(nextP, " 4.Panel On/Off");     break;
+            case rqstMode:  
+                sprintf(nextP, " 5.Time Bcst");        break;
+            case turnOnOff:  
+                sprintf(nextP, " 6.Pump On/Off");      break;
+            case rqstStatus:  
+                sprintf(nextP, " 7.Status");           break;
+            case runAtGPM:  
+                sprintf(nextP, " 9.Run @GPM");         break;
+            default: 
+                sprintf(nextP, " Action: %u(x%02X)", msg.action, msg.action);
         }
-        sprintf(str+strlen(str), " (#%u)", length);
+        sprintf(str+strlen(str), " (#%u)", msg.length);        
         
-        for (int i=0; i<length; i++) {
-            sprintf(str+strlen(str), " %02X", data[i]);
+        for (int i=0; i<msg.length; i++) {
+            sprintf(str+strlen(str), " %02X", msg.data[i]);
         }
         
-        if (checksum == actualChecksum) {
-            sprintf(str+strlen(str), " (x%04X) ✅", checksum);
+        if (msg.checksum == msg.actualChecksum) {
+            sprintf(str+strlen(str), " (x%04X) ✅", msg.checksum);
         } else {
-            sprintf(str+strlen(str), " (x%04X != %04X) ⛔️ERR", checksum, actualChecksum);
+            sprintf(str+strlen(str), " (x%04X != %04X) ⛔️ERR", msg.checksum, msg.actualChecksum);
         }
         ESP_LOGD("custom", str);
     }
