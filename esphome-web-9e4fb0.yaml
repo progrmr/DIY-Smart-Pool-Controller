@@ -411,9 +411,11 @@ sensor:
     update_interval: never
     lambda: |-
       if (PoolPumpRS485::instance->isPipeTempValid()) {
-        return id(pipe_temperature).state;
+        const float x = id(pipe_temperature).state;
+        TemperatureEstimater::instance->setWaterTempC(x);
+        return x;
       } else {
-        return NAN;   // ignore reading, water not flowing in pipe
+        return NAN;
       }
     filters:
       - sliding_window_moving_average:
@@ -460,6 +462,20 @@ sensor:
     # (2) whenever the water_temperature sensor updates.
     update_interval: never
 
+  - platform: custom
+    lambda: |-
+      auto est = new TemperatureEstimater();
+      TemperatureEstimater::instance = est;
+      App.register_component(est);
+      return {est};
+    sensors:
+      - name: "Estimated Water Temp"
+        id: estimated_water_temp
+        accuracy_decimals: 1
+        unit_of_measurement: "°C"
+        device_class: "temperature"
+        state_class: "measurement"
+
 #----------------------------------------------------------------------
 # PIPE TEMPERATURE NTC
 #
@@ -477,7 +493,7 @@ sensor:
       - 10000Ohm -> 25°C
       - 3602Ohm -> 50°C
     filters:
-      - offset: 0.11    # add 0.11 ºC based on calibration check
+      - offset: 0.20    # was: add 0.11 ºC based on calibration check
     on_value:
       then:
         - component.update: water_temperature
@@ -502,6 +518,9 @@ sensor:
       - sliding_window_moving_average:
           window_size: 5
           send_every: 5
+    on_value:
+      then:
+        - lambda: 'TemperatureEstimater::instance->setPanelTempC(x);'
 
 #----------------------------------------------------------------------
 # RESISTANCE SENSORS for thermistor's voltage dividors

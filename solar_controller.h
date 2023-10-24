@@ -5,7 +5,7 @@
 
 // PANEL_START_OFFSET - in ºF, how many degrees panels must be > water 
 // temp in order to turn on solar
-#define PANEL_START_OFFSET (4)      
+#define PANEL_START_OFFSET (6)
 
 // PANEL_STOP_OFFSET - in ºF, how many degrees panel must be > water temp
 // in order to keep solar on, if panels drop below this temp, solar turns off
@@ -54,21 +54,21 @@ class SolarController : public PollingComponent, public BinarySensor {
     void update() override {
         const bool spaMode = id(spa_mode).state;
         
-        // Check to see if the pump is running.  For now, we will not try to start
-        // the pump here.  We only will enable solar heat if the pump is already
-        // running and all the other conditions are met.
-        auto pumpRPMSensor = id(pump_rpm_sensor);
-        const float pumpRPM = pumpRPMSensor.has_state() ? pumpRPMSensor.state : NAN;
-        if (std::isnan(pumpRPM)) {
-            // pump RPM not available, leave solar state unchanged
-            return;
-        }
-        if (pumpRPM < 100.0) {
-            ESP_LOGD("custom","----- SOLAR: OFF (pump is off, RPM %0.0f)", pumpRPM);
-            // no point to running solar if the pump is turned off
-            setSolarHeatState(solarDisabled);
-            return;
-        }
+//        // Check to see if the pump is running.  For now, we will not try to start
+//        // the pump here.  We only will enable solar heat if the pump is already
+//        // running and all the other conditions are met.
+//        auto pumpRPMSensor = id(pump_rpm_sensor);
+//        const float pumpRPM = pumpRPMSensor.has_state() ? pumpRPMSensor.state : NAN;
+//        if (std::isnan(pumpRPM)) {
+//            // pump RPM not available, leave solar state unchanged
+//            return;
+//        }
+//        if (pumpRPM < 100.0) {
+//            ESP_LOGD("custom","----- SOLAR: OFF (pump is off, RPM %0.0f)", pumpRPM);
+//            // no point to running solar if the pump is turned off
+//            setSolarHeatState(solarDisabled);
+//            return;
+//        }
 
         // Time Check: we don't want to run the pump from 1600-2100 local,
         // because that's SDGE peak rates (exception: allow if in Spa mode)
@@ -87,7 +87,7 @@ class SolarController : public PollingComponent, public BinarySensor {
         
         // See how long it has been since we turned on/off the solar valve,
         // we limit how often it can change so we don't keep toggling back and
-        // forth and burn it out.  If it has been at least 5 minutes then we
+        // forth and wear out the seals.  If it has been long enough then we
         // can consider changing it...
         // (exceptions above: if pump off or if peak electric hours)
         //
@@ -102,8 +102,7 @@ class SolarController : public PollingComponent, public BinarySensor {
         }
 
         // get temperatures we need to decide whether to enable or disable solar
-        //
-        auto waterTempC = id(water_temperature);
+        auto waterTempC = id(estimated_water_temp);
         auto panelTempC = id(panel_temperature);
 
         float waterTempF = waterTempC.has_state() ? CtoF(waterTempC.state) : NAN;
@@ -142,8 +141,8 @@ class SolarController : public PollingComponent, public BinarySensor {
         }
         
         if (missingStr.length() > 0) {
-            MilliSec elapsedMissing = millis() - msMissingDataStarted;
-            if (elapsedMissing >= TIMEOUT_INTERVAL*1000 && solarHeatState != solarDisabled) { 
+            MilliSec msElapsedMissing = millis() - msMissingDataStarted;
+            if (msElapsedMissing >= TIMEOUT_INTERVAL*1000 && solarHeatState != solarDisabled) { 
                 ESP_LOGD("custom","***** ERROR: timed out, still missing data, solar disabled");
                 // missing data for long time, disable solar
                 setSolarHeatState(solarDisabled);   
@@ -248,4 +247,141 @@ class SolarController : public PollingComponent, public BinarySensor {
     }
 };
 
+#define MaxWaterTempAgeSeconds (300)  
+#define TemperatureUpdateIntervalSeconds (60)
+#define StdTempDropFPH (1.5/6.5)        // w 20ºF diff, pool lost 1.5º in 6.5 hrs
+#define StdTempDropFPH2 (4.2/13.0)      // w 24ºF diff, pool lost 4.2º in 13 hrs
+#define TempEstimatePollingInterval (60)
+
+class TemperatureEstimater : public PollingComponent, public Sensor {
+public:
+    static TemperatureEstimater* instance;      // singleton
+    
+    // constructor
+    TemperatureEstimater() : PollingComponent(TempEstimatePollingInterval * 1000) {} 
+
+    typedef unsigned long MilliSec;
+
+    float panelTempC = NAN;             // solar panels temp
+    
+    float lastWaterTempC = NAN;         // last valid water temp reading
+    MilliSec msLastWaterTemp = 0;       // time of last valid water temp
+
+    float lastEstimateC = NAN;          // last estimated water temp
+    MilliSec msLastEstimate = 0;        // time of last estimated water temp
+    
+    MilliSec msLastStateUpdate = 0;
+    
+    void setup() override {
+        msLastStateUpdate = millis();
+    }
+    
+    void update() override {
+        const MilliSec msNow = millis();
+        const float secSinceStateUpdate = secElapsed(msNow, msLastStateUpdate);
+        
+        if (secSinceStateUpdate < TemperatureUpdateIntervalSeconds) {
+            return;     // only do state updates few minutes
+        }
+
+        if (std::isnan(lastWaterTempC) || std::isnan(panelTempC)) {
+            // we haven't gotten a water or panel temp yet, can't estimate
+            return;
+        }
+        
+        if (msLastWaterTemp != 0) {
+            // if we haven't gotten a valid water temp in the past
+            // minutes then estimate the water temp
+            float secElapsedSinceValid = secElapsed(msNow, msLastWaterTemp);
+            
+            if (secElapsedSinceValid >= MaxWaterTempAgeSeconds) {
+                // we haven't received a valid water temp for some time,
+                // so we should estimate water temp now
+                MilliSec msLastTemp = msLastWaterTemp;
+                float lastTempC = lastWaterTempC;
+                
+                if (!std::isnan(lastEstimateC)) {
+                    // we have a previous estimate, use it
+                    lastTempC = lastEstimateC;
+                    msLastTemp = msLastEstimate;
+                }
+                
+                lastEstimateC = estimatedTempC(lastTempC, msLastTemp, panelTempC);
+                msLastEstimate = msNow;
+                publish_state(lastEstimateC);
+            }
+        }
+    }
+    
+    float estimatedTempC(float lastTempC, MilliSec msLastTemp, float panelTempC) {
+        const float lastEstimateF = CtoF(lastTempC);
+        const float panelTempF = CtoF(panelTempC);
+        
+        // water temp drops 1.5ºF per 6.5h when panel is 10-20º below water temp
+        const float difference = panelTempF - lastEstimateF;    // - colder, + warmer
+        float dropRateFPH = 0;
+        
+        if (difference < -22) {
+            dropRateFPH = StdTempDropFPH;
+        } else if (difference < -12) {
+            // it's colder out, use the drop rate
+            dropRateFPH = StdTempDropFPH * 0.90;
+        } else if (difference < -5) {
+            // a little colder, use reduced drop rate
+            dropRateFPH = StdTempDropFPH * 0.67;
+        } else if (difference < 0) {
+            // slightly colder, use reduced drop rate
+            dropRateFPH = StdTempDropFPH * 0.33;
+        } else if (difference < 10) {
+            // slightly warmer, use reduced climb rate
+            dropRateFPH = -StdTempDropFPH * 0.33;
+        } else {
+            // warmer, use climb rate
+            dropRateFPH = -StdTempDropFPH * 0.67;
+        } 
+        const float dropRateFPM = dropRateFPH / 60.0;       // convert to per minute rate
+        const float secElapsedSinceLast = secElapsed(millis(), msLastTemp);
+        const float minElapsedSinceLast = secElapsedSinceLast / 60.0;
+        const float dropF = dropRateFPM * minElapsedSinceLast;
+        const float newEstimateF = lastEstimateF - dropF;
+        ESP_LOGD("custom","--- ESTIMATE: %0.3fºF := %0.3f - %0.3f (in %0.0f min)", 
+                 newEstimateF, lastEstimateF, dropF, minElapsedSinceLast);
+        return FtoC(newEstimateF);
+    }
+    
+    void setPanelTempC(float newPanelTempC) {
+        panelTempC = newPanelTempC;
+    }
+    
+    void setWaterTempC(float newWaterTempC) {
+        if (!std::isnan(newWaterTempC)) {
+            // use the sensor's water temperature
+            const MilliSec msNow = millis();
+            lastWaterTempC = newWaterTempC;
+            msLastWaterTemp = msNow;
+
+            lastEstimateC = NAN;            // remove old estimate
+            msLastEstimate = 0;             // no estimate
+            
+            publish_state(newWaterTempC);
+            msLastStateUpdate = msNow;
+        }
+    }
+    
+    float secElapsed(MilliSec now, MilliSec previous) {
+        const MilliSec msElapsed = now - previous;
+        return msElapsed / 1000.0;
+    }
+    
+    float CtoF(float centigrade) {
+        return (centigrade * 1.8) + 32.0;
+    }
+
+    float FtoC(float fahrenheit) {
+        return (fahrenheit - 32.0) / 1.8;
+    }
+    
+};
+
 SolarController* SolarController::instance = 0;
+TemperatureEstimater* TemperatureEstimater::instance = 0;
