@@ -744,6 +744,9 @@ public:
         
         float newDeficitHours = desiredPastDaysHours - pastDaysHours;
         
+        ESP_LOGD("custom","----- Run Hours Deficit: %0.1f (%0.1f actual, %0.1f desired)",
+                 newDeficitHours, pastDaysHours, desiredPastDaysHours);
+
         // should we publish an update?
         float difference = fabs(newDeficitHours - pumpRunHoursDeficit);
         
@@ -775,6 +778,15 @@ public:
         if (newTargetHrs != pumpTargetRunHours) {
             targetRunHours->publish_state(newTargetHrs);
             pumpTargetRunHours = newTargetHrs;
+        }
+
+        // for days with no pump run history (value == nan),
+        // set the run history to match the current target run hours.
+        // Simplifies deficit calc.
+        for (int i=1; i<NDaysPumpHistory; i++) {
+            if (std::isnan(pumpRunHours[i])) {
+                pumpRunHours[i] = newTargetHrs;
+            }
         }
     }
     
@@ -815,6 +827,8 @@ public:
             sprintf(str+strlen(str), "%0.3f ", pumpRunHours[i]);
         }
         ESP_LOGD("custom","----- Pump hours/day: %s", str);
+
+        void updatePumpHoursDeficit();
     }
     
 
