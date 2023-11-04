@@ -130,11 +130,12 @@ number:
     unit_of_measurement: RPM
     device_class: speed
     mode: box
-    max_value: 4000
+    max_value: 3000
     min_value: 0
-    step: 10
+    step: 1
     initial_value: 0
-    set_action:
+    on_value:
+      then:
       - lambda: |-
           const long speed = lroundf(x);
           ESP_LOGD("custom","===== set new requestPumpSpeed RPM: %ld", speed);
@@ -155,7 +156,7 @@ number:
     unit_of_measurement: "°F"
     device_class: temperature
     mode: box
-    min_value: 60
+    min_value: 50
     max_value: 95
     step: 1
     initial_value: 86.6
@@ -175,7 +176,7 @@ number:
     unit_of_measurement: "°F"
     device_class: temperature
     mode: box
-    min_value: 90
+    min_value: 50
     max_value: 105
     step: 1
     initial_value: 100
@@ -231,30 +232,32 @@ binary_sensor:
       - name: "Use Solar Heat"
         id: use_solar_heat
         on_press:
-          - lambda: 'ESP_LOGD("custom","^^^^^^^^^^^^^^^ Solar Heat ON ^^^^^^^^^^^^^^^");'
           # bring pump to to speed, wait a bit, then turn valve to solar
-          - number.set:
-              id: pump_speed_request
-              value: 2701
+          - lambda: |-
+              ESP_LOGD("custom","^^^^^^^^^^^^^^^ Solar Heat ON ^^^^^^^^^^^^^^^");
+              const long newPumpSpeed = PoolPumpRS485::instance->pumpSpeedForSolar(true);
+              id(pump_speed_request)->publish_state(newPumpSpeed);
+          # delay while pump is priming (if off), to let it get up to speed
           - delay: 30s
           # set valve to the solar (open) position
           # valve_direction_relay on, opens the valve
+          # always set direction relay before turning on power
           - switch.turn_on: valve_direction_relay
+          - switch.turn_on: valve_power_relay
+
         on_release:
-          - lambda: 'ESP_LOGD("custom","vvvvvvvvvvvvvvv Solar Heat OFF vvvvvvvvvvvvvvv");'
-          # set pump back to normal speed
-          - number.set:
-              id: pump_speed_request
-              value: 2401
-          - delay: 30s
           # set valve back to normal (closed) position
           # valve_power_relay on, with valve_direction_relay off, closes the valve
+          # always set direction relay before turning on power
           - switch.turn_off: valve_direction_relay
           - switch.turn_on: valve_power_relay
-          - delay: 60s
-          - number.set: 
-              id: pump_speed_request
-              value: 999 
+          # delay gives valve time to switch off (takes 26 sec)
+          - delay: 30s
+          # set pump back to normal speed
+          - lambda: |-
+              ESP_LOGD("custom","vvvvvvvvvvvvvvv Solar Heat OFF vvvvvvvvvvvvvvv");
+              const long newPumpSpeed = PoolPumpRS485::instance->pumpSpeedForSolar(false);
+              id(pump_speed_request)->publish_state(newPumpSpeed);
 
 #----------------------------------------------------------------------
 # PEAK CURRENT - keeps track of the valve actuator's peak currant usage
@@ -673,8 +676,8 @@ switch:
       then:
         - lambda: |-
             ValvePosition::instance->setValveDirectionRelayOn(true);
-        - switch.turn_on: valve_power_relay
-        - delay: 30s
+        - delay: 32s
+        # always turn off power before changing direction
         - switch.turn_off: valve_power_relay
         - switch.turn_off: valve_direction_relay
     on_turn_off:
@@ -686,6 +689,21 @@ switch:
     name: "Spa Mode"
     id: spa_mode
     optimistic: True
+    on_turn_on:
+      then:
+        - lambda: |-
+            ESP_LOGD("custom","^^^^^^^^^^^^^^^ SPA MODE ON ^^^^^^^^^^^^^^^");
+            const bool useSolar = id(use_solar_heat).state;
+            const long newPumpSpeed = PoolPumpRS485::instance->pumpSpeedForSolar(useSolar);
+            id(pump_speed_request)->publish_state(newPumpSpeed);
+    on_turn_off:
+      then:
+        - lambda: |-
+            ESP_LOGD("custom","^^^^^^^^^^^^^^^ SPA MODE OFF ^^^^^^^^^^^^^^^");
+            const bool useSolar = id(use_solar_heat).state;
+            const long newPumpSpeed = PoolPumpRS485::instance->pumpSpeedForSolar(useSolar);
+            id(pump_speed_request)->publish_state(newPumpSpeed);
+
     
 #----------------------------------------------------------------------
 # TIME - used to reset min/max temp at midnight

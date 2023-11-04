@@ -94,6 +94,14 @@ public:
         programRegister = 0x0321,
     };
     
+    enum PumpSpeedValues : uint16_t {
+        pumpSpeedBySked  =  999,    // set pump speed for pool, solar off
+        pumpSpaSolarOff  = 1001,    // set pump speed for spa mode, solar off
+        pumpPoolSolarOff = 2401,    // set pump speed for pool, solar off
+        pumpPoolSolarOn  = 2701,    // set pump speed for pool, solar on
+        pumpSpaSolarOn   = 2702,    // set pump speed for spa mode, solar on
+    };
+
     //
     // RS-485 Message Data Structure, not including preamble (FF 00 FF)
     //
@@ -127,8 +135,9 @@ public:
         0x00, 
         noExtProg };                // turns off any external program running
     
-    bool shouldRequestSolarSpeedOn = false;
-    bool shouldRequestSolarSpeedOff = false;
+    bool shouldRequestExtPgmOn = false;
+    uint8_t shouldRequestExtPgmOff = 0;
+
     long pumpSpeedRequested = 0;
     
     MilliSec msLastPumpPoll = 0;                // track time between polling for status
@@ -184,7 +193,7 @@ public:
                 break;   
                 
             case sendSolarSpeedOn:
-                if (shouldRequestSolarSpeedOn) {
+                if (shouldRequestExtPgmOn) {
                     // transmit a request for pump to switch on to solar speed
                     const auto msg = makeMessage(rqstSetSpeed, 
                                                  sizeof(pumpExtProg4On), 
@@ -201,7 +210,10 @@ public:
                 break;
                 
             case sendSolarSpeedOff:
-                if (shouldRequestSolarSpeedOff) {
+                if (shouldRequestExtPgmOff > 0) {
+                    // decrement counter
+                    shouldRequestExtPgmOff--;
+
                     // transmit a request for pump to switch off solar speed
                     const auto msg = makeMessage(rqstSetSpeed, 
                                                  sizeof(pumpExtProg4On), 
@@ -350,22 +362,44 @@ public:
     //                     if needed, then set it to the desired RPM.
     //
     void requestPumpSpeed(long speed) {
-        if (speed > MaxPumpSpeed) { speed = MaxPumpSpeed; }
-        if (speed < MinPumpSpeed) { speed = MinPumpSpeed; }
-        
         ESP_LOGD("custom","----- requestPumpSpeed: %ld", speed);
-        
-        shouldRequestSolarSpeedOn  = (speed == 2701);
-        shouldRequestSolarSpeedOff = (speed == 2401);
-        
-        if (shouldRequestSolarSpeedOn || shouldRequestSolarSpeedOff) {
+
+        if (speed > MaxPumpSpeed || speed < MinPumpSpeed) {
+            return;         // ignore invalid requests
+        }
+
+        shouldRequestExtPgmOn  = (speed == pumpPoolSolarOn ||
+                                  speed == pumpSpaSolarOn ||
+                                  speed == pumpSpaSolarOff);
+
+        if (speed == pumpPoolSolarOff) {
+            shouldRequestExtPgmOff = 3;     // send this message 3 times
+        } else {
+            shouldRequestExtPgmOff = 0;     // don't send this message
+        }
+
+        if (shouldRequestExtPgmOn || shouldRequestExtPgmOff > 0) {
             // adjust last pump poll time so that next poll occurs in 1 second
+            // that poll will also set the new pump speed
             setNextPollToHappenIn(1000);        // 1 sec in future
         }
         
+        ESP_LOGD("custom","----- requestPumpSpeed: %ld", speed);
         pumpSpeedRequested = speed;
     }
     
+    //
+    // pumpSpeedForMode -- returns the correct pump speed setting given the
+    //                     solar on/off setting and pool/spa mode setting
+    //
+    long pumpSpeedForSolar(bool solarHeatOn) {
+        if (id(spa_mode).state) {
+            return solarHeatOn ? pumpSpaSolarOn : pumpSpaSolarOff;
+        } else {
+            return solarHeatOn ? pumpPoolSolarOn : pumpPoolSolarOff;
+        }
+    }
+
     //
     // setNextPollToHappenIn -- fix polling to happen next in durationMS
     // if time to the next poll less than duration, no change made

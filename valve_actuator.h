@@ -2,7 +2,6 @@
 
 typedef unsigned long MilliSec;
 
-
 class ActuationTime : public Component, public Sensor {
   public:
     static ActuationTime* instance;     // singleton instance
