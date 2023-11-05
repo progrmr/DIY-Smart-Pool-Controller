@@ -144,6 +144,8 @@ public:
     MilliSec msLastPumpStatusReply = 0;         // tracks total pump run time for this polling cycle
     MilliSec msPumpStartTime = 0;               // millis() time of when pump started
 
+    MilliSec msSpaTimerStartTime = 0;           // spa timer, stored here, but managed from yaml
+
     float pumpRunHours[NDaysPumpHistory];       // past history of run time, hrs per day, [0]==today
     float pumpTargetRunHours = NAN;             // target hours per day to run the pump
     float pumpRunHoursDeficit = NAN;            // past 2 days hours deficit
@@ -744,8 +746,8 @@ public:
         
         float newDeficitHours = desiredPastDaysHours - pastDaysHours;
         
-        ESP_LOGD("custom","----- Run Hours Deficit: %0.1f (%0.1f actual, %0.1f desired)",
-                 newDeficitHours, pastDaysHours, desiredPastDaysHours);
+        ESP_LOGD("custom","----- Run Hours Deficit: %0.1f (%0.1f actual, %0.1f desired) [%d days]",
+                 newDeficitHours, pastDaysHours, desiredPastDaysHours, nDaysHistory);
 
         // should we publish an update?
         float difference = fabs(newDeficitHours - pumpRunHoursDeficit);

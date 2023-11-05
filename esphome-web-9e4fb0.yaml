@@ -185,6 +185,46 @@ number:
         - lambda: 'PoolPumpRS485::instance->printDebugInfo();'
 
 #----------------------------------------------------------------------
+# SPA TIMER
+# This is the number of minutes remaining until the spa shuts off.
+# Set this to a number of minutes up to 4 hours (240 minutes) max.
+# This timer counts down and turns off spa mode when it reaches zero.
+#----------------------------------------------------------------------
+  - platform: template
+    name: "Spa Timer"
+    id: spa_timer
+    optimistic: True
+    restore_value: True
+    unit_of_measurement: min
+    mode: slider
+    min_value: 0
+    max_value: 120
+    step: 5
+    initial_value: 0
+    on_value:
+      then:
+        - lambda: |-
+            //------------------------------------
+            // initialize or reset the timer to a new value
+            const float spaTimerSettingMin = x;
+            ESP_LOGD("custom","----- SET SPA TIMER: %0.0f min", spaTimerSettingMin);
+            PoolPumpRS485::instance->msSpaTimerStartTime = millis();
+            //------------------------------------
+            // update time remaining sensor, if needed
+            const float spaTimeRemainingMin = id(spa_time_remaining).state;
+            const bool needsUpdate = abs(spaTimeRemainingMin - spaTimerSettingMin) >= 1.0;
+            if (needsUpdate) {
+              id(spa_time_remaining).update();    // update time remaining
+            }
+            //------------------------------------
+            // turn on/off spa mode, if it changed
+            const bool spaRunning = id(spa_mode).state;
+            const bool spaShouldRun = spaTimerSettingMin >= 2;
+            if (spaRunning != spaShouldRun) {
+              id(spa_mode).publish_state( spaShouldRun );
+            }
+
+#----------------------------------------------------------------------
 # VALVE POSITION (SOLAR)
 #
 # Valve Position can be:  unknown, opening, closing, opened, closed
@@ -259,12 +299,47 @@ binary_sensor:
               const long newPumpSpeed = PoolPumpRS485::instance->pumpSpeedForSolar(false);
               id(pump_speed_request)->publish_state(newPumpSpeed);
 
+sensor:
+#----------------------------------------------------------------------
+# SPA TIME REMAINING
+#----------------------------------------------------------------------
+  - platform: template
+    name: Spa Time Remaining
+    id: spa_time_remaining
+    unit_of_measurement: "min"
+    accuracy_decimals: 1
+    update_interval: 30s
+    lambda: |-
+      //--------------------------------------
+      // check to see if the timer is running
+      const float spaTimerSettingMin = id(spa_timer).state;
+      if (spaTimerSettingMin <= 0.1) {
+        return 0;   // timer is not running
+      }
+      //--------------------------------------
+      // calculate spa time remaining
+      const MilliSec msElapsed = millis() - PoolPumpRS485::instance->msSpaTimerStartTime;
+      const float elapsedSecF = msElapsed / 1000.0;
+      const float spaTimerSecF = spaTimerSettingMin * 60.0;
+      float timeLeftSecF = (spaTimerSecF > elapsedSecF) ? spaTimerSecF - elapsedSecF : 0;
+      ESP_LOGD("custom","----- SPA TIMER (%0.0f min), time left: %0.1f sec", spaTimerSettingMin, timeLeftSecF);
+      return timeLeftSecF / 60.0;    // display time left in minutes
+    on_value:
+      lambda: |-
+        //--------------------------------------
+        // if timer ran out, reset timer to 0
+        const bool spaTimeRanOut = (x <= 0.1);
+        const bool spaTimerActive = id(spa_timer).state >= 0.1;
+        if (spaTimerActive && spaTimeRanOut) {
+          ESP_LOGD("custom","----- SPA TIMER time ran out");
+          id(spa_timer).publish_state(0);       // reset the timer to 0
+        }
+
 #----------------------------------------------------------------------
 # PEAK CURRENT - keeps track of the valve actuator's peak currant usage
 # measured in amps. This is for diagnostic purposes.
 # https://esphome.io/components/sensor/custom.html
 #----------------------------------------------------------------------
-sensor:
   - platform: custom
     lambda: |-
       auto pc = new PeakCurrent();
