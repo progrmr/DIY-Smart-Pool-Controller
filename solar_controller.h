@@ -54,6 +54,22 @@ class SolarController : public PollingComponent, public BinarySensor {
     void update() override {
         const bool spaMode = id(spa_mode).state;
         
+        // Check to see if the pump is running.  For now, we will not try to start
+        // the pump here.  We only will enable solar heat if the pump is already
+        // running and all the other conditions are met.
+        auto pumpRPMSensor = id(pump_rpm_sensor);
+        const float pumpRPM = pumpRPMSensor.has_state() ? pumpRPMSensor.state : NAN;
+        if (std::isnan(pumpRPM)) {
+            // pump RPM not available, leave solar state unchanged
+            return;
+        }
+        if (pumpRPM < 100.0) {
+            ESP_LOGD("custom","----- SOLAR: OFF (pump is off, RPM %0.0f)", pumpRPM);
+            // no point to running solar if the pump is turned off
+            setSolarHeatState(solarDisabled);
+            return;
+        }
+
         // Time Check: we don't want to run the pump from 1600-2100 local,
         // because that's SDGE peak rates (exception: allow if in Spa mode)
         //
