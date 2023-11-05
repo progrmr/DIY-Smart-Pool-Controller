@@ -204,24 +204,31 @@ number:
     on_value:
       then:
         - lambda: |-
+            auto timeRemaining = id(spa_time_remaining);
+            auto spaMode = id(spa_mode);
+
             //------------------------------------
-            // initialize or reset the timer to a new value
-            const float spaTimerSettingMin = x;
-            ESP_LOGD("custom","----- SET SPA TIMER: %0.0f min", spaTimerSettingMin);
-            PoolPumpRS485::instance->msSpaTimerStartTime = millis();
+            // setting the timer to a new value
+            //
+            const float curTimerSettingMin = x;
+            ESP_LOGD("custom","----- SET SPA TIMER: %0.0f min", curTimerSettingMin);
+
             //------------------------------------
             // update time remaining sensor, if needed
-            const float spaTimeRemainingMin = id(spa_time_remaining).state;
-            const bool needsUpdate = abs(spaTimeRemainingMin - spaTimerSettingMin) >= 1.0;
+            //
+            const float timeRemainingMin = timeRemaining->state;
+            const bool needsUpdate = abs(timeRemainingMin - curTimerSettingMin) >= 0.1;
             if (needsUpdate) {
-              id(spa_time_remaining).update();    // update time remaining
+              timeRemaining->update();    // update time remaining
             }
+
             //------------------------------------
             // turn on/off spa mode, if it changed
-            const bool spaRunning = id(spa_mode).state;
-            const bool spaShouldRun = spaTimerSettingMin >= 2;
-            if (spaRunning != spaShouldRun) {
-              id(spa_mode).publish_state( spaShouldRun );
+            //
+            const bool spaIsRunning = spaMode->state;
+            const bool spaShouldRun = curTimerSettingMin >= 2.0;
+            if (spaIsRunning != spaShouldRun) {
+              spaMode->publish_state( spaShouldRun );
             }
 
 #----------------------------------------------------------------------
@@ -301,38 +308,64 @@ binary_sensor:
 
 sensor:
 #----------------------------------------------------------------------
-# SPA TIME REMAINING
+# SPA TIME REMAINING -- count down display of the time remaining
+# on the spa timer.  When this gets to 0, the timer is reset to 0,
+# which shuts off the spa.
 #----------------------------------------------------------------------
   - platform: template
     name: Spa Time Remaining
     id: spa_time_remaining
-    unit_of_measurement: "min"
+    unit_of_measurement: "minutes"
     accuracy_decimals: 1
-    update_interval: 30s
+    update_interval: 20s
     lambda: |-
+      auto timer = id(spa_timer);
+      const float curTimerSettingMin = timer->state;
+
+      static float oldTimerSettingMin = 0;
+      static unsigned long msTimerStartTime = 0;
+
       //--------------------------------------
-      // check to see if the timer is running
-      const float spaTimerSettingMin = id(spa_timer).state;
-      if (spaTimerSettingMin <= 0.1) {
+      // if timer is NOT running, we're done
+      //
+      const bool isTimerRunning = (curTimerSettingMin >= 0.1);
+      if (!isTimerRunning) {
+        oldTimerSettingMin = 0;
+        msTimerStartTime = 0;
         return 0;   // timer is not running
       }
+
       //--------------------------------------
-      // calculate spa time remaining
-      const MilliSec msElapsed = millis() - PoolPumpRS485::instance->msSpaTimerStartTime;
+      // if the timer setting changed, reset the start time
+      //
+      const bool timerSettingChanged = abs(oldTimerSettingMin - curTimerSettingMin) > 0.1;
+      if (timerSettingChanged) {
+        oldTimerSettingMin = curTimerSettingMin;
+        msTimerStartTime = millis();
+        return curTimerSettingMin;    // timer was reset
+      }
+
+      //--------------------------------------
+      // calculate timer's time remaining
+      //
+      const MilliSec msElapsed = millis() - msTimerStartTime;
       const float elapsedSecF = msElapsed / 1000.0;
-      const float spaTimerSecF = spaTimerSettingMin * 60.0;
-      float timeLeftSecF = (spaTimerSecF > elapsedSecF) ? spaTimerSecF - elapsedSecF : 0;
-      ESP_LOGD("custom","----- SPA TIMER (%0.0f min), time left: %0.1f sec", spaTimerSettingMin, timeLeftSecF);
-      return timeLeftSecF / 60.0;    // display time left in minutes
+      const float timerSecF = curTimerSettingMin * 60.0;
+      float timeLeftSecF = (timerSecF > elapsedSecF) ? timerSecF - elapsedSecF : 0;
+      ESP_LOGD("custom","----- SPA TIMER (%0.0f min), time left: %0.1f sec", curTimerSettingMin, timeLeftSecF);
+      return timeLeftSecF / 60.0;     // time remaining
     on_value:
       lambda: |-
+        auto timer = id(spa_timer);
+        const float curTimerSettingMin = timer->state;
         //--------------------------------------
         // if timer ran out, reset timer to 0
-        const bool spaTimeRanOut = (x <= 0.1);
-        const bool spaTimerActive = id(spa_timer).state >= 0.1;
-        if (spaTimerActive && spaTimeRanOut) {
-          ESP_LOGD("custom","----- SPA TIMER time ran out");
-          id(spa_timer).publish_state(0);       // reset the timer to 0
+        //
+        const bool timerActive = curTimerSettingMin >= 0.1;
+        const bool timerEnding = (x <= 0.1);
+        if (timerActive && timerEnding) {
+          ESP_LOGD("custom","----- SPA TIMER: timer ended");
+          timer->publish_state(0);       // reset the timer to 0
         }
 
 #----------------------------------------------------------------------
@@ -770,14 +803,16 @@ switch:
             ESP_LOGD("custom","^^^^^^^^^^^^^^^ SPA MODE ON ^^^^^^^^^^^^^^^");
             const bool useSolar = id(use_solar_heat).state;
             const long newPumpSpeed = PoolPumpRS485::instance->pumpSpeedForSolar(useSolar);
-            id(pump_speed_request)->publish_state(newPumpSpeed);
+            /// TODO: UNCOMMENT THIS AFTER TESTING
+            ///id(pump_speed_request)->publish_state(newPumpSpeed);
     on_turn_off:
       then:
         - lambda: |-
             ESP_LOGD("custom","^^^^^^^^^^^^^^^ SPA MODE OFF ^^^^^^^^^^^^^^^");
             const bool useSolar = id(use_solar_heat).state;
             const long newPumpSpeed = PoolPumpRS485::instance->pumpSpeedForSolar(useSolar);
-            id(pump_speed_request)->publish_state(newPumpSpeed);
+            /// TODO: UNCOMMENT THIS AFTER TESTING
+            ///id(pump_speed_request)->publish_state(newPumpSpeed);
 
     
 #----------------------------------------------------------------------
