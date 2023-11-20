@@ -86,6 +86,22 @@ uart:
   rx_pin: GPIO27
   baud_rate: 9600
 
+globals:
+  - id: pump_actual_run_hours
+    type: float[3]
+    initial_value: '{0,0,0}'
+    restore_value: yes
+  - id: pump_target_run_hours
+    type: float[3]
+    initial_value: '{0,0,0}'
+    restore_value: yes
+
+  # SOTD (Second of the Day, range: 0...86399), midnight == 0, 23:59:59 == 86399
+  - id: spa_timer_end_sotd
+    type: long
+    initial_value: '-1'
+    restore_value: yes
+
 #----------------------------------------------------------------------
 # CURRENT LIMIT
 # Current Limit is used to detect problems with the valve actuator.  
@@ -194,41 +210,54 @@ number:
     name: "Spa Timer"
     id: spa_timer
     optimistic: True
-    restore_value: True
     unit_of_measurement: min
     mode: slider
     min_value: 0
     max_value: 120
-    step: 5
+    step: 1
     initial_value: 0
     on_value:
       then:
         - lambda: |-
-            auto timeRemaining = id(spa_time_remaining);
             auto spaMode = id(spa_mode);
-
+            auto spaTimerEndSotd = id(spa_timer_end_sotd);
+            
+            const bool spaIsRunning = spaMode->state;
             //------------------------------------
             // setting the timer to a new value
-            //
-            const float curTimerSettingMin = x;
-            ESP_LOGD("custom","----- SET SPA TIMER: %0.0f min", curTimerSettingMin);
+            const long newTimerSetMin = lroundf(x);
+            const bool spaShouldRun = newTimerSetMin >= 1;
+            ESP_LOGD("custom","----- SET SPA TIMER: %ld min", newTimerSetMin);
 
-            //------------------------------------
-            // update time remaining sensor, if needed
-            //
-            const float timeRemainingMin = timeRemaining->state;
-            const bool needsUpdate = abs(timeRemainingMin - curTimerSettingMin) >= 0.1;
-            if (needsUpdate) {
-              timeRemaining->update();    // update time remaining
+            // Update spaMode if needed
+            if (spaShouldRun != spaIsRunning) {
+                spaMode->publish_state( spaShouldRun );
+            }
+
+            if (newTimerSetMin <= 0) {
+              // timer was reset to 0, cancel the timer end time
+              id(spa_timer_end_sotd) = -1;    // invalid time
+              return;
             }
 
             //------------------------------------
-            // turn on/off spa mode, if it changed
+            // calculate timer end time
             //
-            const bool spaIsRunning = spaMode->state;
-            const bool spaShouldRun = curTimerSettingMin >= 2.0;
-            if (spaIsRunning != spaShouldRun) {
-              spaMode->publish_state( spaShouldRun );
+            auto sntp = id(local_sntp_time);
+            const static long SOTD_MAX = 24 * 60 * 60;   // number of seconds per day
+            const ESPTime timeNow = sntp->now();
+            const long sotdNow = ((timeNow.hour * 60) + timeNow.minute) * 60 + timeNow.second;
+            long newSotdTimerEnd = sotdNow + newTimerSetMin * 60;
+            if (newSotdTimerEnd >= SOTD_MAX) {
+              newSotdTimerEnd -= SOTD_MAX;   // fix after midnight time
+            }
+
+            // minimize writes to EEPROM memory
+            if (spaTimerEndSotd != newSotdTimerEnd) {
+              ESP_LOGD("custom","----- SET SPA END TIME: %02ld:%02ld:%02ld (was %02ld:%02ld:%02ld)", 
+                        newSotdTimerEnd/3600, (newSotdTimerEnd%3600)/60, newSotdTimerEnd%60, 
+                        spaTimerEndSotd/3600, (spaTimerEndSotd%3600)/60, spaTimerEndSotd%60);
+              id(spa_timer_end_sotd) = newSotdTimerEnd;
             }
 
 #----------------------------------------------------------------------
@@ -315,58 +344,88 @@ sensor:
   - platform: template
     name: Spa Time Remaining
     id: spa_time_remaining
-    unit_of_measurement: "minutes"
-    accuracy_decimals: 1
-    update_interval: 20s
+    unit_of_measurement: "s"
+    accuracy_decimals: 0
+    update_interval: 15s
     lambda: |-
+      long timerEndSotd = id(spa_timer_end_sotd);
+      if (timerEndSotd <= 0) {
+        return 0;             // no end time, timer is not running
+      }
+
+      // if timerEndSotd is tomorrow (early morning) and we are
+      // still today (late evening), adjust timerEndSotd
+      const static long SOTD_MAX = 24 * 60 * 60;   // number of seconds per day
+      const static long SOTD_NOON = SOTD_MAX / 2;   
+      auto sntp = id(local_sntp_time);
+      const ESPTime timeNow = sntp->now();
+      const long sotdNow = ((timeNow.hour * 60) + timeNow.minute) * 60 + timeNow.second;
+
+      if (timerEndSotd < SOTD_NOON && sotdNow > SOTD_NOON) {
+        timerEndSotd += SOTD_MAX;     // make timer end after midnight
+      }
+      const long remainingSec = (timerEndSotd > sotdNow) ? timerEndSotd - sotdNow : 0;
+
+      // check to see if timer setting should be updated as timer runs down
+      // if the timer setting doesn't match the time remaining by more than
+      // 60 seconds, then update it.
       auto timer = id(spa_timer);
-      const float curTimerSettingMin = timer->state;
-
-      static float oldTimerSettingMin = 0;
-      static unsigned long msTimerStartTime = 0;
-
-      //--------------------------------------
-      // if timer is NOT running, we're done
-      //
-      const bool isTimerRunning = (curTimerSettingMin >= 0.1);
-      if (!isTimerRunning) {
-        oldTimerSettingMin = 0;
-        msTimerStartTime = 0;
-        return 0;   // timer is not running
+      const long curTimerSettingMin = lroundf(timer->state);
+      if (curTimerSettingMin <= 0) {
+        return 0;       // timer is finished
+      }
+      const long curTimerSettingSec = curTimerSettingMin * 60;
+      long diff = (curTimerSettingSec - remainingSec);
+      diff = (diff < 0) ? -diff : diff;   // absolute value
+      if (diff >= 60) {
+        TBD;
       }
 
-      //--------------------------------------
-      // if the timer setting changed, reset the start time
-      //
-      const bool timerSettingChanged = abs(oldTimerSettingMin - curTimerSettingMin) > 0.1;
-      if (timerSettingChanged) {
-        oldTimerSettingMin = curTimerSettingMin;
-        msTimerStartTime = millis();
-        return curTimerSettingMin;    // timer was reset
-      }
 
-      //--------------------------------------
-      // calculate timer's time remaining
+
+      return remainingSec;
       //
-      const MilliSec msElapsed = millis() - msTimerStartTime;
-      const float elapsedSecF = msElapsed / 1000.0;
-      const float timerSecF = curTimerSettingMin * 60.0;
-      float timeLeftSecF = (timerSecF > elapsedSecF) ? timerSecF - elapsedSecF : 0;
-      ESP_LOGD("custom","----- SPA TIMER (%0.0f min), time left: %0.1f sec", curTimerSettingMin, timeLeftSecF);
-      return timeLeftSecF / 60.0;     // time remaining
+      //auto timer = id(spa_timer);
+      //const long curTimerSettingMin = lroundf(timer->state);
+      //const bool isTimerRunning = (curTimerSettingMin > 0);
+      //
+      //static float oldTimerSettingMin = 0;
+      //static unsigned long msTimerStartTime = 0;
+      //
+      ////--------------------------------------
+      //// if the timer setting changed, reset the start time
+      ////
+      //const bool timerSettingChanged = abs(oldTimerSettingMin - curTimerSettingMin) > 0.1;
+      //if (timerSettingChanged) {
+      //    oldTimerSettingMin = curTimerSettingMin;
+      //    msTimerStartTime = millis();
+      //    return curTimerSettingMin;    // timer was reset
+      //}
+      //
+      ////--------------------------------------
+      //// calculate timer's time remaining
+      ////
+      //const MilliSec msElapsed = millis() - msTimerStartTime;
+      //const float elapsedSecF = msElapsed / 1000.0;
+      //const float timerSecF = curTimerSettingMin * 60.0;
+      //float timeLeftSecF = (timerSecF > elapsedSecF) ? timerSecF - elapsedSecF : 0;
+      //ESP_LOGD("custom","----- SPA TIMER (%0.0f min), time left: %0.1f sec", curTimerSettingMin, timeLeftSecF);
+      //return timeLeftSecF / 60.0;     // time remaining
     on_value:
       lambda: |-
-        auto timer = id(spa_timer);
-        const float curTimerSettingMin = timer->state;
-        //--------------------------------------
-        // if timer ran out, reset timer to 0
-        //
-        const bool timerActive = curTimerSettingMin >= 0.1;
-        const bool timerEnding = (x <= 0.1);
-        if (timerActive && timerEnding) {
-          ESP_LOGD("custom","----- SPA TIMER: timer ended");
-          timer->publish_state(0);       // reset the timer to 0
-        }
+        //ESP_LOGD("custom","----- SPA TIMER, time left: %0.0f sec", x);
+        //# auto timer = id(spa_timer);
+        //const float curTimerSettingMin = timer->state;
+        ////--------------------------------------
+        //// if timer ran out, reset timer to 0
+        ////
+        //const bool timerActive = curTimerSettingMin >= 0.1;
+        //const bool timerEnding = (x <= 0.1);
+        //if (timerActive && timerEnding) {
+        //    ESP_LOGD("custom","----- SPA TIMER: timer ended");
+        //    timer->publish_state(0);       // reset the timer to 0
+        //}
+
 
 #----------------------------------------------------------------------
 # PEAK CURRENT - keeps track of the valve actuator's peak currant usage
@@ -477,10 +536,17 @@ sensor:
         # slow speeds get less hours.
       - name: "Pump Run Hours"
         id: pump_run_hours
-        accuracy_decimals: 4
-        unit_of_measurement: h
+        accuracy_decimals: 3
         state_class: "measurement"
-        device_class: "duration"
+        on_value:
+          then:
+            - lambda: |-
+                float *pumpHrs = id(pump_actual_run_hours);
+                // only perform an update if it differs by 1/2 hour,
+                // to minimize eeprom writes and not wear it out.
+                if (abs(x-pumpHrs[0]) >= 0.5) {
+                  pumpHrs[0] = x;    // update
+                }
 
         # PUMP TARGET HOURS 
         # This is the number of hours the pump should run per day to get
@@ -488,16 +554,12 @@ sensor:
       - name: "Pump Target Hours"
         id: pump_target_hours
         accuracy_decimals: 1
-        unit_of_measurement: h
         state_class: "measurement"
-        device_class: "duration"
 
       - name: "Pump Hours Deficit"
         id: pump_hours_deficit
         accuracy_decimals: 1
-        unit_of_measurement: h
         state_class: "measurement"
-        device_class: "duration"
 
 #----------------------------------------------------------------------
 # WATER TEMPERATURE
@@ -828,10 +890,21 @@ time:
         hours: 0
         then:
           - lambda: |-
-              // at midnight, reset pump run time to 0
-              PoolPumpRS485::instance->resetTotalPumpRunTime();
-              
               // at midnight, reset min/max to current waterTemp
               const float waterTemp = id(water_temperature)->state;
               id(minimum_water_temperature)->publish_state(waterTemp);
               id(maximum_water_temperature)->publish_state(waterTemp);
+
+              // at midnight, reset pump run time to 0
+              auto pumpTargetHrs = id(pump_target_run_hours);
+              auto pumpActualHrs = id(pump_actual_run_hours);
+              int day = 2;       // start with last index
+              while (day >= 1) {
+                pumpActualHrs[day] = pumpActualHrs[day-1];
+                pumpTargetHrs[day] = pumpTargetHrs[day-1];
+                day--;
+              }
+              // zero out hours, a new day is starting
+              pumpActualHrs[0] = 0.0; 
+              pumpTargetHrs[0] = 0.0;
+
