@@ -144,8 +144,6 @@ public:
     MilliSec msLastPumpStatusReply = 0;         // tracks total pump run time for this polling cycle
     MilliSec msPumpStartTime = 0;               // millis() time of when pump started
 
-    float pumpActualRunHours[NDaysPumpHistory]; // past history of run time, hrs per day, [0]==today
-    float pumpTargetRunHours[NDaysPumpHistory]; // peak target hours per day to run the pump
     float pumpRunHoursDeficit = NAN;            // past 2 days hours deficit
     
     uint16_t lastPumpRPM   = 9999;
@@ -160,15 +158,8 @@ public:
         // init a few things
         msLastPumpPoll = millis();		// init time of "previous" polling interval
         
-        // set history to unknown (skip [0], leave today at 0.0)
-        for (int i=1; i<NDaysPumpHistory; i++) {
-            pumpActualRunHours[i] = NAN;      // history is unknown on reboot
-            pumpTargetRunHours[i] = NAN;
-        }
-        pumpActualRunHours[0] = 0;            // today starts with 0 hours
-        pumpTargetRunHours[0] = pumpHoursForWaterTempF(50);     // starting point
-
-        runTimeSensor->publish_state( pumpActualRunHours[0] );
+        auto& pumpHrs = id(pump_actual_run_hours);
+        runTimeSensor->publish_state( pumpHrs[0] );
     }
     
     //
@@ -662,46 +653,23 @@ public:
         
         // if we have the time of the previous pump status message and
         // the pump is running, then count the elapsed run time
-        if (msLastPumpStatusReply > 0) {
-            if (curPumpRPM > 1000) {
-                MilliSec msElapsed = msNow - msLastPumpStatusReply;
-                
-                // get 100% run time credit at 2400, more when faster, less when slower
-                float timeCreditFactor = curPumpRPM / 2400.0;     
-                
-                // adjust msElapsed by the timeCreditFactor, convert to seconds
-                float secCredit = (msElapsed / 1000.0) * timeCreditFactor;
-                
-                if (secCredit >= 0.5) {
-                    // update total run time for today (in hours)
-                    float hrsCredit = secCredit / 3600.0;
-                    pumpActualRunHours[0] += hrsCredit;
-                    runTimeSensor->publish_state( pumpActualRunHours[0] );
-                }
-            }
+        if (msLastPumpStatusReply > 0 && curPumpRPM > 1000) {
+            MilliSec msElapsed = msNow - msLastPumpStatusReply;
+            
+            // get 100% run time credit at 2400, more when faster, less when slower
+            float timeCreditFactor = curPumpRPM / 2400.0;
+            
+            // adjust msElapsed by the timeCreditFactor, convert to seconds
+            float secsCredit = (msElapsed / 1000.0) * timeCreditFactor;
+            
+            auto& savedPumpHrs = id(pump_actual_run_hours);
+            savedPumpHrs[0] += secsCredit / 3600.0;
+            
+            // publish sensor value of pump hours
+            runTimeSensor->publish_state( savedPumpHrs[0] );
         }
+        
         msLastPumpStatusReply = msNow;  // start next period
-    }
-    
-    //-----------------------------------------------------
-    // midnight reset of pump run time history
-    // save run time totals for past few days, 
-    // zero out today's run time and start counting again.
-    //
-    // NOTE: this is called at midnight from yaml in the sntp lambda
-    //-----------------------------------------------------
-    void resetTotalPumpRunTime() {
-        // shift the past days history over by 1 into higher array slots,
-        // [0]==today, [1]==1 day ago, [2]==2 days ago, ... [6]==6 days ago
-        //
-        int day = NDaysPumpHistory-1;       // start with last index
-        while (day >= 1) {
-            pumpActualRunHours[day] = pumpActualRunHours[day-1];
-            pumpTargetRunHours[day] = pumpTargetRunHours[day-1];
-            day--;
-        }
-        // zero out run time, a new day is starting
-        pumpActualRunHours[0] = 0.0; 
     }
 
     void updatePumpStartTime(float pumpRPM) {
@@ -728,33 +696,33 @@ public:
         float actualPastDaysHours = 0;
         float targetPastDaysHours = 0;
 
-        for (int i=0; i<NDaysPumpHistory; i++) {
-            if (!std::isnan(pumpActualRunHours[i]) &&
-                !std::isnan(pumpTargetRunHours[i]))
-            {
-                nDaysHistory++;
-                actualPastDaysHours += pumpActualRunHours[i];
-                targetPastDaysHours += pumpTargetRunHours[i];
-            }
-        }
-        
-        if (nDaysHistory == 0) {
-            runHoursDeficit->publish_state(NAN);
-            return;     // no history hours
-        }
-        
-        float newDeficitHours = targetPastDaysHours - actualPastDaysHours;
-
-        ESP_LOGD("custom","----- PUMP HOURS Deficit: %0.1f (%0.1f actual, %0.1f target) [%d days]",
-                 newDeficitHours, actualPastDaysHours, targetPastDaysHours, nDaysHistory);
-
-        // should we publish an update?
-        float difference = fabs(newDeficitHours - pumpRunHoursDeficit);
-        
-        if (std::isnan(pumpRunHoursDeficit) || difference >= 0.1) {
-            pumpRunHoursDeficit = newDeficitHours;
-            runHoursDeficit->publish_state(newDeficitHours);
-        }
+//        for (int i=0; i<NDaysPumpHistory; i++) {
+//            if (!std::isnan(pumpActualRunHours[i]) &&
+//                !std::isnan(pumpTargetRunHours[i]))
+//            {
+//                nDaysHistory++;
+//                actualPastDaysHours += pumpActualRunHours[i];
+//                targetPastDaysHours += pumpTargetRunHours[i];
+//            }
+//        }
+//        
+//        if (nDaysHistory == 0) {
+//            runHoursDeficit->publish_state(NAN);
+//            return;     // no history hours
+//        }
+//        
+//        float newDeficitHours = targetPastDaysHours - actualPastDaysHours;
+//
+//        ESP_LOGD("custom","----- PUMP HOURS Deficit: %0.1f (%0.1f actual, %0.1f target) [%d days]",
+//                 newDeficitHours, actualPastDaysHours, targetPastDaysHours, nDaysHistory);
+//
+//        // should we publish an update?
+//        float difference = fabs(newDeficitHours - pumpRunHoursDeficit);
+//        
+//        if (std::isnan(pumpRunHoursDeficit) || difference >= 0.1) {
+//            pumpRunHoursDeficit = newDeficitHours;
+//            runHoursDeficit->publish_state(newDeficitHours);
+//        }
     }
     
     float CtoF(float centigrade) {
@@ -775,18 +743,24 @@ public:
         }
 
         const float newTargetHrs = pumpHoursForWaterTempF(waterTempF);
+        auto& pumpTargetHrs = id(pump_target_run_hours);
+        auto& pumpActualHrs = id(pump_actual_run_hours);
 
-        if (newTargetHrs > pumpTargetRunHours[0]) {
-            pumpTargetRunHours[0] = newTargetHrs;
+        if (newTargetHrs != pumpTargetHrs[0]) {
+            pumpTargetHrs[0] = newTargetHrs;
             targetRunHours->publish_state(newTargetHrs);
         }
 
-        for (int i=0; i<NDaysPumpHistory; i++) {
-            if (std::isnan(pumpTargetRunHours[i])) {
-                pumpTargetRunHours[i] = newTargetHrs;
-            }
-            if (std::isnan(pumpActualRunHours[i])) {
-                pumpActualRunHours[i] = newTargetHrs;
+        // if pump target hours history is all 0, then it has never
+        // been initialized, do that now
+        if (pumpTargetHrs[NDaysPumpHistory-1] < 0.1) {
+            for (int i=1; i<NDaysPumpHistory; i++) {
+                if (pumpTargetHrs[i] < 0.1) {
+                    pumpTargetHrs[i] = newTargetHrs;
+                }
+                if (pumpActualHrs[i] < 0.1) {
+                    pumpActualHrs[i] = newTargetHrs;
+                }
             }
         }
     }
@@ -821,9 +795,15 @@ public:
     
     // called from yaml in a lambda, as desired to debug hours data
     void printDebugInfo() {
+        auto pumpTargetHrs = id(pump_target_run_hours);
+        auto pumpActualHrs = id(pump_actual_run_hours);
+
         for (int i=0; i<NDaysPumpHistory; i++) {
-            ESP_LOGD("custom","----- PUMP HOURS (day %d) --- target: %0.2f, actual: %0.2f hours",
-                    i, pumpTargetRunHours[i], pumpActualRunHours[i]);
+            float actual = pumpActualHrs[i];
+            float target = pumpTargetHrs[i];
+            ESP_LOGD("custom",
+                     "----- PUMP HOURS (day %d) --- target: %0.2f, actual: %0.2f hours",
+                     i, target, actual);
         }
 
         void updatePumpHoursDeficit();

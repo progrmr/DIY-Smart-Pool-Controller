@@ -377,9 +377,9 @@ sensor:
       const long curTimerSettingSec = curTimerSettingMin * 60;
       long diff = (curTimerSettingSec - remainingSec);
       diff = (diff < 0) ? -diff : diff;   // absolute value
-      if (diff >= 60) {
-        TBD;
-      }
+      //if (diff >= 60) {
+      //  TBD;
+      //}
 
 
 
@@ -538,15 +538,6 @@ sensor:
         id: pump_run_hours
         accuracy_decimals: 3
         state_class: "measurement"
-        on_value:
-          then:
-            - lambda: |-
-                float *pumpHrs = id(pump_actual_run_hours);
-                // only perform an update if it differs by 1/2 hour,
-                // to minimize eeprom writes and not wear it out.
-                if (abs(x-pumpHrs[0]) >= 0.5) {
-                  pumpHrs[0] = x;    // update
-                }
 
         # PUMP TARGET HOURS 
         # This is the number of hours the pump should run per day to get
@@ -896,8 +887,8 @@ time:
               id(maximum_water_temperature)->publish_state(waterTemp);
 
               // at midnight, reset pump run time to 0
-              auto pumpTargetHrs = id(pump_target_run_hours);
-              auto pumpActualHrs = id(pump_actual_run_hours);
+              auto& pumpTargetHrs = id(pump_target_run_hours);
+              auto& pumpActualHrs = id(pump_actual_run_hours);
               int day = 2;       // start with last index
               while (day >= 1) {
                 pumpActualHrs[day] = pumpActualHrs[day-1];
