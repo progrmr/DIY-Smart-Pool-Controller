@@ -12,9 +12,10 @@
 #define PANEL_STOP_OFFSET (1)       
 
 #define SolarControllerPollIntervalSecs (30)    // seconds, how often to evaluate
-#define DataMissingTimeOutSecs (30)         // seconds, timeout waiting for data
+#define DataMissingTimeOutSecs (60)             // seconds, timeout waiting for data
 
-#define MinimumValveChangeIntervalSecs (6*60)  // seconds, don't change valve unless this time has passed
+#define MinimumValveChangeIntervalSecs (7*60)  // seconds, don't change valve unless this time has passed
+#define MinimumDesiredChangeIntervalSecs (7*60)  // seconds, don't change states unless the desired state has been constant this long
 
 class SolarController : public PollingComponent, public BinarySensor {
   public:
@@ -30,6 +31,11 @@ class SolarController : public PollingComponent, public BinarySensor {
         solarDisabled,
         solarEnabled,
     };
+    
+    // track desired solar heat state
+    //
+    MilliSec msSolarDesiredStateChanged = 0
+    SolarHeatStates desiredSolarState = unknown
     
     // track solar heat state
     //
@@ -47,6 +53,7 @@ class SolarController : public PollingComponent, public BinarySensor {
 
     void setup() override {
         const MilliSec now = millis();
+        msSolarDesiredStateChanged = now;
         msSolarHeatStateChanged = now;
         msValvePositionChanged = now;
     }
@@ -140,12 +147,21 @@ class SolarController : public PollingComponent, public BinarySensor {
 
         // evaluate whether we should enable solar heat
         //
-        const SolarHeatStates newSolarState = evaluate(spaMode, 
-                                                       targetTempF, 
-                                                       waterTempF, 
-                                                       panelTempF);
-
-        setSolarHeatState( newSolarState );
+        const SolarHeatStates newDesiredSolarState = evaluate(spaMode, targetTempF, waterTempF, panelTempF);
+        
+        if desiredSolarState != newDesiredSolarState {
+            // update time when desired state changed
+            msSolarDesiredStateChanged = millis();  // track when desired state changes
+            desiredSolarState = newDesiredSolarState;      // track desired state
+        }
+        
+        // check to see how recently the desired state changed
+        const MilliSec msElapsedDesired = millis() - msSolarDesiredStateChanged;
+        const float secElapsedDesired = msElapsedDesired / 1000.0;
+        if (secElapsedDesired >= MinimumDesiredChangeIntervalSecs) {
+            // the desire has been the same for long enough, allow the change
+            setSolarHeatState( newDesiredSolarState );
+        }
     }
     
     void setSolarHeatState(SolarHeatStates newState) {
