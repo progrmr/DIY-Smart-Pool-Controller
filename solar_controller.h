@@ -14,8 +14,8 @@
 #define SolarControllerPollIntervalSecs (30)    // seconds, how often to evaluate
 #define DataMissingTimeOutSecs (60)             // seconds, timeout waiting for data
 
-#define MinimumValveChangeIntervalSecs (7*60)  // seconds, don't change valve unless this time has passed
-#define MinimumDesiredChangeIntervalSecs (7*60)  // seconds, don't change states unless the desired state has been constant this long
+#define MinimumValveChangeIntervalSecs (5*60)  // seconds, don't change valve unless this time has passed
+#define MinimumDesiredChangeIntervalSecs (5*60)  // seconds, don't change states unless the desired state has been constant this long
 
 class SolarController : public PollingComponent, public BinarySensor {
   public:
@@ -34,8 +34,8 @@ class SolarController : public PollingComponent, public BinarySensor {
     
     // track desired solar heat state
     //
-    MilliSec msSolarDesiredStateChanged = 0
-    SolarHeatStates desiredSolarState = unknown
+    MilliSec msSolarDesiredStateChanged = 0;
+    SolarHeatStates desiredSolarState = unknown;
     
     // track solar heat state
     //
@@ -80,11 +80,15 @@ class SolarController : public PollingComponent, public BinarySensor {
         // Time Check: we don't want to run the pump from 1600-2100 local,
         // because that's SDGE peak rates (exception: allow if in Spa mode)
         //
+        auto sntp = id(local_sntp_time);
+        const ESPTime timeNow = sntp.now(); 
+        const int hour = timeNow.hour;
+
         if (!spaMode) {
-            auto sntp = id(local_sntp_time);
-            const ESPTime timeNow = sntp.now(); 
-            const int hour = timeNow.hour;
-            if (hour >= 16 && hour <= 21) {
+//------------------
+// TEMPORARY 16-18 instezd of 16-21 hours FOR TESTING
+//------------------
+            if (hour >= 16 && hour <= 18) {
                 ESP_LOGD("custom","----- SOLAR: OFF (%02d:%02d is peak rates)", 
                          hour, timeNow.minute);
                 setSolarHeatState(solarDisabled);
@@ -147,14 +151,25 @@ class SolarController : public PollingComponent, public BinarySensor {
 
         // evaluate whether we should enable solar heat
         //
-        const SolarHeatStates newDesiredSolarState = evaluate(spaMode, targetTempF, waterTempF, panelTempF);
-        
-        if desiredSolarState != newDesiredSolarState {
-            // update time when desired state changed
-            msSolarDesiredStateChanged = millis();  // track when desired state changes
-            desiredSolarState = newDesiredSolarState;      // track desired state
-        }
-        
+	SolarHeatStates newDesiredSolarState = unknown;
+
+	if (hour >= 8 && hour <= 19) {
+	        newDesiredSolarState = evaluateHeat(spaMode, targetTempF, waterTempF, panelTempF);
+	        if (desiredSolarState != newDesiredSolarState) {
+	            // update time when desired state changed
+	            msSolarDesiredStateChanged = millis();  	// track when desired state changes
+	            desiredSolarState = newDesiredSolarState;   // track desired state
+	        }
+	} else {
+		// evaluate whether we should enable solar cooling
+		newDesiredSolarState = evaluateCooling(spaMode, targetTempF, waterTempF, panelTempF);
+		if (desiredSolarState != newDesiredSolarState) {
+	            // update time when desired state changed
+	            msSolarDesiredStateChanged = millis();  	// track when desired state changes
+	            desiredSolarState = newDesiredSolarState;   // track desired state
+	        }
+	} 
+
         // check to see how recently the desired state changed
         const MilliSec msElapsedDesired = millis() - msSolarDesiredStateChanged;
         const float secElapsedDesired = msElapsedDesired / 1000.0;
@@ -191,7 +206,48 @@ class SolarController : public PollingComponent, public BinarySensor {
         }
     }
     
-    SolarHeatStates evaluate(bool spaMode, float targetTempF, float waterTempF, float panelTempF) {
+    SolarHeatStates evaluateCooling(bool spaMode, float targetTempF, float waterTempF, float panelTempF) {
+        float targetWaterTempF = targetTempF;
+	if (waterTempF <= targetWaterTempF) {
+            ESP_LOGD("custom","----- SOLAR: NO COOLING NEED (water %0.1f <= target %0.1f)", 
+                     waterTempF, targetWaterTempF);
+	    return solarDisabled;		// water too cold, no cooling needed
+	}
+        ESP_LOGD("custom","----- SOLAR: NEED COOLING (water %0.1f <= target %0.1f)", waterTempF, targetWaterTempF);
+	
+
+        // Check the solar panel temperature.  If it isn't cool enough then we don't have solar cooling
+        // available.  If it is cool enough, then start solar
+        //
+        float maxPanelTempF = waterTempF;
+        switch (solarHeatState) {
+            case solarEnabled:
+                // if solar is already on, we keep it on as long as the panels
+                // are below the water temp by the stop offset amount
+                maxPanelTempF -= PANEL_STOP_OFFSET;
+                break;
+            case solarDisabled:
+            default:
+                // if solar is off, we require the panels to be below the water
+                // temp by the start offset amount in order to start solar
+                maxPanelTempF -= PANEL_START_OFFSET;
+                break;
+        }
+
+        if (panelTempF <= maxPanelTempF) {
+            ESP_LOGD("custom",
+                     "----- SOLAR: GO, PANELS COOLER (water %0.1f, panel %0.1f <= max %0.1f, target %0.1f)",
+                     waterTempF, panelTempF, maxPanelTempF, targetWaterTempF);
+            return solarEnabled;
+        } else {
+            ESP_LOGD("custom",
+                     "----- SOLAR: NO GO, PANELS WARMER (water %0.1f, panel %0.1f > max %0.1f, target %0.1f)",
+                     waterTempF, panelTempF, maxPanelTempF, targetWaterTempF);
+            return solarDisabled;
+        }
+    }
+
+    SolarHeatStates evaluateHeat(bool spaMode, float targetTempF, float waterTempF, float panelTempF) {
         // Check the water temperature.  If it is already above the target 
         // temperature then we don't want solar heat on.
         float tolerance = spaMode ? SPA_TARGET_TOLERANCE : POOL_TARGET_TOLERANCE;
@@ -215,12 +271,12 @@ class SolarController : public PollingComponent, public BinarySensor {
         }
         
         if (waterTempF >= targetWaterTempF) {
-            ESP_LOGD("custom","----- SOLAR: NO NEED (water %0.1f >= target %0.1f)", 
+            ESP_LOGD("custom","----- SOLAR: NO HEAT NEED (water %0.1f >= target %0.1f)", 
                      waterTempF, targetWaterTempF);
             return solarDisabled;
         }
 
-        ESP_LOGD("custom","----- SOLAR: NEEDED (water %0.1f < target %0.1f)",
+        ESP_LOGD("custom","----- SOLAR: NEED HEAT (water %0.1f < target %0.1f)",
                  waterTempF, targetWaterTempF);
 
         // Check the solar panel temperature.  If it isn't hot enough then we don't have solar heat
@@ -247,13 +303,13 @@ class SolarController : public PollingComponent, public BinarySensor {
         
         if (panelTempF >= minPanelTempF) {
             ESP_LOGD("custom",
-                     "----- SOLAR: PANELS HOT (water %0.1f, panel %0.1f >= min %0.1f, target %0.1f)",
-                     waterTempF, panelTempF, minPanelTempF, targetWaterTempF);
+                     "----- SOLAR: GO, PANELS HOT (panel %0.1f >= min %0.1f)",
+                     panelTempF, minPanelTempF);
             return solarEnabled;
         } else {
             ESP_LOGD("custom",
-                     "----- SOLAR: PANELS COOL (water %0.1f, panel %0.1f < min %0.1f, target %0.1f)",
-                     waterTempF, panelTempF, minPanelTempF, targetWaterTempF);
+                     "----- SOLAR: NO GO, PANELS COOLER (panel %0.1f < min %0.1f)",
+		     panelTempF, minPanelTempF);
             return solarDisabled;
         }
     }
