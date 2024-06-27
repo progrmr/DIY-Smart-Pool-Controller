@@ -62,7 +62,8 @@ api:
     key: "MlixHoYywbRk7gFoWjevidw9EjKcaUDVhOz1a1xSjv0="
 
 ota:
-
+  - platform: esphome
+  
 wifi:
   networks:
   - ssid: !secret wifi_ssid
@@ -158,7 +159,7 @@ number:
           PoolPumpRS485::instance->requestPumpSpeed(speed);
 
 #----------------------------------------------------------------------
-# POOL TARGET TEMPERATURE
+# POOL HEAT TARGET TEMPERATURE
 # This is for display so the pool users can set their desired pool
 # water temperature.  It is used by the solar controller to decide
 # how long to run the solar heat and get to this target.
@@ -173,9 +174,29 @@ number:
     device_class: temperature
     mode: box
     min_value: 50
-    max_value: 95
+    max_value: 99
     step: 1
-    initial_value: 86.6
+    initial_value: 85
+
+#----------------------------------------------------------------------
+# POOL COOLING TARGET TEMPERATURE
+# This is for display so the user can set the desired pool cooling
+# water temperature.  It is used by the solar controller to decide
+# how long to run the solar at night to get down to this target.
+# https://esphome.io/components/number/template
+#----------------------------------------------------------------------
+  - platform: template
+    name: "Pool Cooling Target Temperature"
+    id: pool_cooling_target
+    optimistic: True
+    restore_value: True
+    unit_of_measurement: "°F"
+    device_class: temperature
+    mode: box
+    min_value: 50
+    max_value: 99
+    step: 1
+    initial_value: 88
 
 #----------------------------------------------------------------------
 # SPA TARGET TEMPERATURE

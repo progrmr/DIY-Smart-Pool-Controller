@@ -85,11 +85,8 @@ class SolarController : public PollingComponent, public BinarySensor {
         const int hour = timeNow.hour;
 
         if (!spaMode) {
-//------------------
-// TEMPORARY 16-18 instezd of 16-21 hours FOR TESTING
-//------------------
-            if (hour >= 16 && hour <= 18) {
-                ESP_LOGD("custom","----- SOLAR: OFF (%02d:%02d is peak rates)", 
+            if (hour >= 16 && hour < 21) {
+                ESP_LOGD("custom","----- SOLAR: OFF (%02d:%02d is peak rates)",
                          hour, timeNow.minute);
                 setSolarHeatState(solarDisabled);
                 return;
@@ -102,14 +99,17 @@ class SolarController : public PollingComponent, public BinarySensor {
 
         float waterTempF = waterTempC.has_state() ? CtoF(waterTempC.state) : NAN;
         float panelTempF = panelTempC.has_state() ? CtoF(panelTempC.state) : NAN;
-        float targetTempF = NAN;
+        float targetHeatTempF = NAN;
+        float targetCoolTempF = NAN;
 
         if (spaMode) {
             auto spaTargetF = id(spa_target_temp);
-            targetTempF = spaTargetF.has_state() ? spaTargetF.state : NAN;
+            targetHeatTempF = spaTargetF.has_state() ? spaTargetF.state : NAN;
         } else {
-            auto poolTargetF = id(pool_target_temp);
-            targetTempF = poolTargetF.has_state() ? poolTargetF.state : NAN;
+            auto poolHeatTargetF = id(pool_target_temp);
+            targetHeatTempF = poolHeatTargetF.has_state() ? poolHeatTargetF.state : NAN;
+            auto poolTargetCoolF = id(pool_cooling_target);
+            targetCoolTempF = poolTargetCoolF.has_state() ? poolTargetCoolF.state : NAN;
         }
         
         // check for missing data
@@ -119,8 +119,8 @@ class SolarController : public PollingComponent, public BinarySensor {
         if (std::isnan(waterTempF)) {
             missingStr += " water temp";
         }
-        if (std::isnan(targetTempF)) {
-            missingStr += " target temp";
+        if (std::isnan(targetHeatTempF)) {
+            missingStr += " target heat temp";
         }
         if (std::isnan(panelTempF)) {
             missingStr += " panel temp";
@@ -151,25 +151,22 @@ class SolarController : public PollingComponent, public BinarySensor {
 
         // evaluate whether we should enable solar heat
         //
-	SolarHeatStates newDesiredSolarState = unknown;
-
-	if (hour >= 8 && hour <= 19) {
-	        newDesiredSolarState = evaluateHeat(spaMode, targetTempF, waterTempF, panelTempF);
-	        if (desiredSolarState != newDesiredSolarState) {
-	            // update time when desired state changed
-	            msSolarDesiredStateChanged = millis();  	// track when desired state changes
-	            desiredSolarState = newDesiredSolarState;   // track desired state
-	        }
-	} else {
-		// evaluate whether we should enable solar cooling
-		newDesiredSolarState = evaluateCooling(spaMode, targetTempF, waterTempF, panelTempF);
-		if (desiredSolarState != newDesiredSolarState) {
-	            // update time when desired state changed
-	            msSolarDesiredStateChanged = millis();  	// track when desired state changes
-	            desiredSolarState = newDesiredSolarState;   // track desired state
-	        }
-	} 
-
+        SolarHeatStates newDesiredSolarState = unknown;
+        
+        if (spaMode || (hour >= 8 && hour <= 19)) {
+            // evaluate whether we should enable solar heating
+            newDesiredSolarState = evaluateHeat(spaMode, targetHeatTempF, waterTempF, panelTempF);
+        } else {
+            // evaluate whether we should enable solar cooling
+            newDesiredSolarState = evaluateCooling(spaMode, targetCoolTempF, waterTempF, panelTempF);
+        }
+        
+        if (desiredSolarState != newDesiredSolarState) {
+            // update time when desired state changed
+            msSolarDesiredStateChanged = millis();      // track when desired state changes
+            desiredSolarState = newDesiredSolarState;   // track desired state
+        }
+        
         // check to see how recently the desired state changed
         const MilliSec msElapsedDesired = millis() - msSolarDesiredStateChanged;
         const float secElapsedDesired = msElapsedDesired / 1000.0;
@@ -208,14 +205,13 @@ class SolarController : public PollingComponent, public BinarySensor {
     
     SolarHeatStates evaluateCooling(bool spaMode, float targetTempF, float waterTempF, float panelTempF) {
         float targetWaterTempF = targetTempF;
-	if (waterTempF <= targetWaterTempF) {
-            ESP_LOGD("custom","----- SOLAR: NO COOLING NEED (water %0.1f <= target %0.1f)", 
+        if (waterTempF <= targetWaterTempF) {
+            ESP_LOGD("custom","----- SOLAR: NO COOLING NEED (water %0.1f <= target %0.1f)",
                      waterTempF, targetWaterTempF);
-	    return solarDisabled;		// water too cold, no cooling needed
-	}
+            return solarDisabled;		// water too cold, no cooling needed
+        }
         ESP_LOGD("custom","----- SOLAR: NEED COOLING (water %0.1f <= target %0.1f)", waterTempF, targetWaterTempF);
-	
-
+        
         // Check the solar panel temperature.  If it isn't cool enough then we don't have solar cooling
         // available.  If it is cool enough, then start solar
         //
