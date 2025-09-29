@@ -1,0 +1,8 @@
+sensor:
+  - platform: custom
+    lambda: |-
+      auto estimator = TemperatureEstimator::getInstance();
+      estimator->setup();  // ← Creates and registers the sensor internally
+      return {estimator->sensor};
+    sensors:
+      name: "Estimated Water Temp"

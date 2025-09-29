@@ -62,7 +62,7 @@ api:
     key: "MlixHoYywbRk7gFoWjevidw9EjKcaUDVhOz1a1xSjv0="
 
 ota:
-  - platform: esphome
+  platform: esphome
   
 wifi:
   networks:

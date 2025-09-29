@@ -1,0 +1,23 @@
+sensor:
+  - platform: custom
+    lambda: |-
+      auto actuator = ValveActuator::getInstance();
+      actuator->setup();
+      return {actuator->peakCurrentSensor, actuator->actuationTimeSensor};
+    sensors:
+      - name: "Peak Current"
+        unit_of_measurement: "A"
+        device_class: current
+        state_class: measurement
+      - name: "Actuation Time"
+        unit_of_measurement: "s"
+        state_class: measurement
+
+text_sensor:
+  - platform: custom
+    lambda: |-
+      auto actuator = ValveActuator::getInstance();
+      actuator->setup();
+      return {actuator->valvePositionSensor};
+    text_sensors:
+      name: "Valve Position"

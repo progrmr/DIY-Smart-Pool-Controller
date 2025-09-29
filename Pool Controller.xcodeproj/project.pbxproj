@@ -1,0 +1,163 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXFileReference section */
+		B27137942E8AB4DC008A976A /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		B27137952E8AB4DC008A976A /* component.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = component.py; sourceTree = "<group>"; };
+		B27137962E8AB4DC008A976A /* pool_pump_rs485.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = pool_pump_rs485.h; sourceTree = "<group>"; };
+		B27137972E8AB4DC008A976A /* pool_pump_rs485.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = pool_pump_rs485.cpp; sourceTree = "<group>"; };
+		B27137992E8AB4DC008A976A /* component.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = component.yaml; sourceTree = "<group>"; };
+		B271379B2E8AB4DC008A976A /* solar_controller.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = solar_controller.h; sourceTree = "<group>"; };
+		B271379C2E8AB4DC008A976A /* solar_controller.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = solar_controller.cpp; sourceTree = "<group>"; };
+		B271379E2E8AB4DC008A976A /* component.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = component.yaml; sourceTree = "<group>"; };
+		B27137A02E8AB4DC008A976A /* temp_estimator.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = temp_estimator.h; sourceTree = "<group>"; };
+		B27137A12E8AB4DC008A976A /* temp_estimator.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = temp_estimator.cpp; sourceTree = "<group>"; };
+		B27137A32E8AB4DC008A976A /* component.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = component.yaml; sourceTree = "<group>"; };
+		B27137A52E8AB4DC008A976A /* valve_actuator.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = valve_actuator.h; sourceTree = "<group>"; };
+		B27137A62E8AB4DC008A976A /* valve_actuator.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = valve_actuator.cpp; sourceTree = "<group>"; };
+		B27137A82E8AB4DC008A976A /* common_types.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = common_types.h; sourceTree = "<group>"; };
+		B27137AB2E8AB4DC008A976A /* esphome-web-9e4fb0.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = "esphome-web-9e4fb0.yaml"; sourceTree = "<group>"; };
+		B27137AC2E8AB4DC008A976A /* pool_pump_rs485.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = pool_pump_rs485.h; sourceTree = "<group>"; };
+		B27137AD2E8AB4DC008A976A /* solar_controller.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = solar_controller.h; sourceTree = "<group>"; };
+		B27137AE2E8AB4DC008A976A /* time_tester.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = time_tester.h; sourceTree = "<group>"; };
+		B27137AF2E8AB4DC008A976A /* valve_actuator.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = valve_actuator.h; sourceTree = "<group>"; };
+		B27137B12E8ABA45008A976A /* README.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = README.txt; sourceTree = "<group>"; };
+		B27137B42E8AD608008A976A /* pool_controller.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = pool_controller.yaml; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		B27137982E8AB4DC008A976A /* pool_pump_rs485 */ = {
+			isa = PBXGroup;
+			children = (
+				B27137942E8AB4DC008A976A /* __init__.py */,
+				B27137952E8AB4DC008A976A /* component.py */,
+				B27137962E8AB4DC008A976A /* pool_pump_rs485.h */,
+				B27137972E8AB4DC008A976A /* pool_pump_rs485.cpp */,
+			);
+			path = pool_pump_rs485;
+			sourceTree = "<group>";
+		};
+		B271379D2E8AB4DC008A976A /* solar_controller */ = {
+			isa = PBXGroup;
+			children = (
+				B27137992E8AB4DC008A976A /* component.yaml */,
+				B271379B2E8AB4DC008A976A /* solar_controller.h */,
+				B271379C2E8AB4DC008A976A /* solar_controller.cpp */,
+			);
+			path = solar_controller;
+			sourceTree = "<group>";
+		};
+		B27137A22E8AB4DC008A976A /* temperature_estimator */ = {
+			isa = PBXGroup;
+			children = (
+				B271379E2E8AB4DC008A976A /* component.yaml */,
+				B27137A02E8AB4DC008A976A /* temp_estimator.h */,
+				B27137A12E8AB4DC008A976A /* temp_estimator.cpp */,
+			);
+			path = temperature_estimator;
+			sourceTree = "<group>";
+		};
+		B27137A72E8AB4DC008A976A /* valve_actuator */ = {
+			isa = PBXGroup;
+			children = (
+				B27137A32E8AB4DC008A976A /* component.yaml */,
+				B27137A52E8AB4DC008A976A /* valve_actuator.h */,
+				B27137A62E8AB4DC008A976A /* valve_actuator.cpp */,
+			);
+			path = valve_actuator;
+			sourceTree = "<group>";
+		};
+		B27137AA2E8AB4DC008A976A /* new_external_components */ = {
+			isa = PBXGroup;
+			children = (
+				B27137B42E8AD608008A976A /* pool_controller.yaml */,
+				B27137B12E8ABA45008A976A /* README.txt */,
+				B27137A82E8AB4DC008A976A /* common_types.h */,
+				B27137982E8AB4DC008A976A /* pool_pump_rs485 */,
+				B271379D2E8AB4DC008A976A /* solar_controller */,
+				B27137A22E8AB4DC008A976A /* temperature_estimator */,
+				B27137A72E8AB4DC008A976A /* valve_actuator */,
+			);
+			path = new_external_components;
+			sourceTree = "<group>";
+		};
+		B27137B02E8AB4DC008A976A /* old_custom_components */ = {
+			isa = PBXGroup;
+			children = (
+				B27137AB2E8AB4DC008A976A /* esphome-web-9e4fb0.yaml */,
+				B27137AC2E8AB4DC008A976A /* pool_pump_rs485.h */,
+				B27137AD2E8AB4DC008A976A /* solar_controller.h */,
+				B27137AE2E8AB4DC008A976A /* time_tester.h */,
+				B27137AF2E8AB4DC008A976A /* valve_actuator.h */,
+			);
+			path = old_custom_components;
+			sourceTree = "<group>";
+		};
+		B2A7190F2E8773D8003D3245 = {
+			isa = PBXGroup;
+			children = (
+				B27137B02E8AB4DC008A976A /* old_custom_components */,
+				B27137AA2E8AB4DC008A976A /* new_external_components */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXProject section */
+		B2A719102E8773D8003D3245 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastUpgradeCheck = 1640;
+			};
+			buildConfigurationList = B2A719132E8773D8003D3245 /* Build configuration list for PBXProject "Pool Controller" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = B2A7190F2E8773D8003D3245;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+			);
+		};
+/* End PBXProject section */
+
+/* Begin XCBuildConfiguration section */
+		B2A719142E8773D8003D3245 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+			};
+			name = Debug;
+		};
+		B2A719152E8773D8003D3245 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		B2A719132E8773D8003D3245 /* Build configuration list for PBXProject "Pool Controller" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B2A719142E8773D8003D3245 /* Debug */,
+				B2A719152E8773D8003D3245 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = B2A719102E8773D8003D3245 /* Project object */;
+}

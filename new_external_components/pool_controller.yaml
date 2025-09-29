@@ -1,0 +1,873 @@
+substitutions:
+  devicename: esphome-pool-controller
+  friendly_devicename: "ESPHome Pool Controller"
+  deviceip: 192.168.0.229
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_devicename}
+  # The 'includes' key is removed and replaced by the 'external_components' block below.
+  on_boot:
+    priority: -10
+    then:
+      - delay: 10s
+      - lambda: |-
+          //---------------------
+          // need to call requestPumpSpeed after reboot in case we
+          // are requesting a particular pump speed.  The C++ class gets
+          // reinitialized when booting and we need to restore the speed.
+          //---------------------
+          auto pumpSpeedRequest = id(pump_speed_request)->state;
+          if (!std::isnan(pumpSpeedRequest)) {
+            long speed = lroundf(pumpSpeedRequest);
+            ESP_LOGD("custom","===== BOOT: restoring requestPumpSpeed RPM %ld", speed);
+            id(pool_pump).requestPumpSpeed(speed);
+          }
+      - delay: 5s
+      - lambda: |-
+          //---------------------
+          // need to init various sensors, they don't get
+          // restored after a reboot
+          //---------------------
+          id(valve_actuator_amps)->publish_state(0);
+          id(peak_current)->publish_state(0);
+          id(actuation_time)->publish_state(0);
+          //id(pump_run_hours)->publish_state(0);
+          //id(pump_target_hours)->publish_state(8);
+      - delay: 15s
+      - lambda: |-
+          uint32_t notConnectedCount = 0;
+          while (!WiFi.isConnected()) {
+            delay(100);   // delay 100 ms
+            notConnectedCount++;
+            if (notConnectedCount > 300) {   // reset board if not connected after 30s
+              ESP.restart();
+            }
+          }
+
+# NEW: This block registers all your custom components.
+external_components:
+  - source: ./components
+    components:
+      - valve_position
+      - solar_controller
+      - peak_current
+      - actuation_time
+      - pool_pump_rs485
+      - temperature_estimator
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "MlixHoYywbRk7gFoWjevidw9EjKcaUDVhOz1a1xSjv0="
+
+ota:
+  platform: esphome
+
+wifi:
+  networks:
+  - ssid: !secret wifi_ssid
+    password: !secret wifi_password
+
+  # Optional manual IP
+  manual_ip:
+    static_ip: ${deviceip}
+    gateway: 192.168.0.1
+    subnet: 255.255.255.0
+    dns1: 192.168.0.1
+
+#----------------------------------------------------------------------
+# UART is used for RS-485 serial comm with the Pentair Pool Pump
+# the PoolPumpRS485 custom component class handles the actual
+# sending and receiving messages via the RS-485 serial port.
+#----------------------------------------------------------------------
+uart:
+  id: pump_uart_bus
+  tx_pin: GPIO14
+  rx_pin: GPIO27
+  baud_rate: 9600
+
+globals:
+  - id: pump_actual_run_hours
+    type: float[3]
+    initial_value: '{0,0,0}'
+    restore_value: yes
+  - id: pump_target_run_hours
+    type: float[3]
+    initial_value: '{0,0,0}'
+    restore_value: yes
+
+  # SOTD (Second of the Day, range: 0...86399), midnight == 0, 23:59:59 == 86399
+  - id: spa_timer_end_sotd
+    type: long
+    initial_value: '-1'
+    restore_value: yes
+
+#----------------------------------------------------------------------
+# CURRENT LIMIT
+# Current Limit is used to detect problems with the valve actuator.
+# Not Implemented Yet: when current exceeds this limit we should
+# turn the valve actuator off and report an fault.
+# https://esphome.io/components/number/template
+#----------------------------------------------------------------------
+number:
+  - platform: template
+    name: "Current Limit"
+    id: current_limit
+    optimistic: True
+    restore_value: True
+    max_value: 2.0
+    min_value: 0.1
+    step: 0.1
+    initial_value: 0.7
+    device_class: "current"
+    mode: box
+    # do something with the limit, when actual current exceeds limit
+    # NOTE: automation in HA detects over limit and sends notifications
+
+#----------------------------------------------------------------------
+# PUMP SPEED REQUEST
+# This is a temporary solution to commanding the pump toa higher RPM
+# when the solar valve is on, the higher RPM is needed to efficiently
+# circulate water through the solar panels on the roof.  The RPM is
+# set in the pump itself in one of the external programs put in via
+# the pump's keypad.  See pump's user manual for details.
+#
+# 1. Set speed 2701 to command external program which runs at 2700 RPM
+# 2. Set speed 2401 to command NOT using external program (reverts to normal)
+# 3. Set speed to any other value to stop sending commands (pump reverts to normal after ~60 sec)
+#
+# https://esphome.io/components/number/template
+#----------------------------------------------------------------------
+  - platform: template
+    name: "Pump Speed Request"
+    id: pump_speed_request
+    optimistic: True
+    restore_value: True
+    unit_of_measurement: RPM
+    device_class: speed
+    mode: box
+    max_value: 3000
+    min_value: 0
+    step: 1
+    initial_value: 0
+    on_value:
+      then:
+      - lambda: |-
+          const long speed = lroundf(x);
+          ESP_LOGD("custom","===== set new requestPumpSpeed RPM: %ld", speed);
+          id(pool_pump).requestPumpSpeed(speed);
+
+#----------------------------------------------------------------------
+# POOL HEAT TARGET TEMPERATURE
+# This is for display so the pool users can set their desired pool
+# water temperature.  It is used by the solar controller to decide
+# how long to run the solar heat and get to this target.
+# https://esphome.io/components/number/template
+#----------------------------------------------------------------------
+  - platform: template
+    name: "Pool Target Temperature"
+    id: pool_target_temp
+    optimistic: True
+    restore_value: True
+    unit_of_measurement: "°F"
+    device_class: temperature
+    mode: box
+    min_value: 50
+    max_value: 99
+    step: 1
+    initial_value: 85
+
+#----------------------------------------------------------------------
+# POOL COOLING TARGET TEMPERATURE
+# This is for display so the user can set the desired pool cooling
+# water temperature.  It is used by the solar controller to decide
+# how long to run the solar at night to get down to this target.
+# https://esphome.io/components/number/template
+#----------------------------------------------------------------------
+  - platform: template
+    name: "Pool Cooling Target Temperature"
+    id: pool_cooling_target
+    optimistic: True
+    restore_value: True
+    unit_of_measurement: "°F"
+    device_class: temperature
+    mode: box
+    min_value: 50
+    max_value: 99
+    step: 1
+    initial_value: 88
+
+#----------------------------------------------------------------------
+# SPA TARGET TEMPERATURE
+# This is for display so the spa users can set their desired spa
+# water temperature.  It is used by the solar controller to decide
+# how long to run the solar heat and get to this target.
+# https://esphome.io/components/number/template
+#----------------------------------------------------------------------
+  - platform: template
+    name: "Spa Target Temperature"
+    id: spa_target_temp
+    optimistic: True
+    restore_value: True
+    unit_of_measurement: "°F"
+    device_class: temperature
+    mode: box
+    min_value: 50
+    max_value: 105
+    step: 1
+    initial_value: 100
+    on_value:
+      then:
+        - lambda: 'id(pool_pump).printDebugInfo();'
+
+#----------------------------------------------------------------------
+# SPA TIMER
+# This is the number of minutes remaining until the spa shuts off.
+# Set this to a number of minutes up to 4 hours (240 minutes) max.
+# This timer counts down and turns off spa mode when it reaches zero.
+#----------------------------------------------------------------------
+  - platform: template
+    name: "Spa Timer"
+    id: spa_timer
+    optimistic: True
+    unit_of_measurement: min
+    mode: slider
+    min_value: 0
+    max_value: 120
+    step: 1
+    initial_value: 0
+    on_value:
+      then:
+        - lambda: |-
+            auto spaMode = id(spa_mode);
+            auto spaTimerEndSotd = id(spa_timer_end_sotd);
+
+            const bool spaIsRunning = spaMode->state;
+            //------------------------------------
+            // setting the timer to a new value
+            const long newTimerSetMin = lroundf(x);
+            const bool spaShouldRun = newTimerSetMin >= 1;
+            ESP_LOGD("custom","----- SET SPA TIMER: %ld min", newTimerSetMin);
+
+            // Update spaMode if needed
+            if (spaShouldRun != spaIsRunning) {
+                spaMode->publish_state( spaShouldRun );
+            }
+
+            if (newTimerSetMin <= 0) {
+              // timer was reset to 0, cancel the timer end time
+              id(spa_timer_end_sotd) = -1;    // invalid time
+              return;
+            }
+
+            //------------------------------------
+            // calculate timer end time
+            //
+            auto sntp = id(local_sntp_time);
+            const static long SOTD_MAX = 24 * 60 * 60;   // number of seconds per day
+            const ESPTime timeNow = sntp->now();
+            const long sotdNow = ((timeNow.hour * 60) + timeNow.minute) * 60 + timeNow.second;
+            long newSotdTimerEnd = sotdNow + newTimerSetMin * 60;
+            if (newSotdTimerEnd >= SOTD_MAX) {
+              newSotdTimerEnd -= SOTD_MAX;   // fix after midnight time
+            }
+
+            // minimize writes to EEPROM memory
+            if (spaTimerEndSotd != newSotdTimerEnd) {
+              ESP_LOGD("custom","----- SET SPA END TIME: %02ld:%02ld:%02ld (was %02ld:%02ld:%02ld)",
+                        newSotdTimerEnd/3600, (newSotdTimerEnd%3600)/60, newSotdTimerEnd%60,
+                        spaTimerEndSotd/3600, (spaTimerEndSotd%3600)/60, spaTimerEndSotd%60);
+              id(spa_timer_end_sotd) = newSotdTimerEnd;
+            }
+
+#----------------------------------------------------------------------
+# VALVE POSITION (SOLAR)
+#
+# Valve Position can be:  unknown, opening, closing, opened, closed
+# It is initially unknown, but changes based on the relay states etc.
+# It is set inside the ValvePosition class.
+#
+# https://esphome.io/components/text_sensor/custom.html
+#----------------------------------------------------------------------
+text_sensor:
+  # MODIFIED: platform is now 'valve_position'
+  - platform: valve_position
+    name: "Valve Position"
+    id: valve_position # This ID now refers to both the component and the text_sensor
+    on_value:
+      then:
+        - lambda: 'id(solar_ctrl).setValvePosition(x);'
+
+#----------------------------------------------------------------------
+# SOLAR CONTROLLER
+#
+# Determines if we should be running water through the solar panels.
+# The binary output is true if we should be using solar.  It checks
+# conditions periodically and updates its decision.  It decides based
+# on water temp, panel temp, target temp, pump RPM, and
+# time since last valve position change.  It is designed to have
+# hysteresis so that the valve position is not changing back and forth
+# every couple minutes, which would wear it out.  For example: it will
+# hold its current binary state if the valve position has changed
+# within past 5 minutes.
+# https://esphome.io/components/binary_sensor/custom.html
+#----------------------------------------------------------------------
+binary_sensor:
+  # MODIFIED: platform is now 'solar_controller'
+  - platform: solar_controller
+    id: solar_ctrl # NEW: Added an ID for the main component
+    use_solar_heat: # NEW: This key is defined in the component's __init__.py
+      name: "Use Solar Heat"
+      id: use_solar_heat
+      on_press:
+        # bring pump to to speed, wait a bit, then turn valve to solar
+        - lambda: |-
+            ESP_LOGD("custom","^^^^^^^^^^^^^^^ Solar Heat ON ^^^^^^^^^^^^^^^");
+            const long newPumpSpeed = id(pool_pump).pumpSpeedForSolar(true);
+            id(pump_speed_request)->publish_state(newPumpSpeed);
+        # delay while pump is priming (if off), to let it get up to speed
+        - delay: 30s
+        # set valve to the solar (open) position
+        # valve_direction_relay on, opens the valve
+        # always set direction relay before turning on power
+        - switch.turn_on: valve_direction_relay
+        - switch.turn_on: valve_power_relay
+
+      on_release:
+        # set valve back to normal (closed) position
+        # valve_power_relay on, with valve_direction_relay off, closes the valve
+        # always set direction relay before turning on power
+        - switch.turn_off: valve_direction_relay
+        - switch.turn_on: valve_power_relay
+        # delay gives valve time to switch off (takes 26 sec)
+        - delay: 30s
+        # set pump back to normal speed
+        - lambda: |-
+            ESP_LOGD("custom","vvvvvvvvvvvvvvv Solar Heat OFF vvvvvvvvvvvvvvv");
+            const long newPumpSpeed = id(pool_pump).pumpSpeedForSolar(false);
+            id(pump_speed_request)->publish_state(newPumpSpeed);
+
+sensor:
+#----------------------------------------------------------------------
+# SPA TIME REMAINING -- count down display of the time remaining
+# on the spa timer.  When this gets to 0, the timer is reset to 0,
+# which shuts off the spa.
+#----------------------------------------------------------------------
+  - platform: template
+    name: Spa Time Remaining
+    id: spa_time_remaining
+    unit_of_measurement: "s"
+    accuracy_decimals: 0
+    update_interval: 15s
+    lambda: |-
+      long timerEndSotd = id(spa_timer_end_sotd);
+      if (timerEndSotd <= 0) {
+        return 0;             // no end time, timer is not running
+      }
+
+      // if timerEndSotd is tomorrow (early morning) and we are
+      // still today (late evening), adjust timerEndSotd
+      const static long SOTD_MAX = 24 * 60 * 60;   // number of seconds per day
+      const static long SOTD_NOON = SOTD_MAX / 2;
+      auto sntp = id(local_sntp_time);
+      const ESPTime timeNow = sntp->now();
+      const long sotdNow = ((timeNow.hour * 60) + timeNow.minute) * 60 + timeNow.second;
+
+      if (timerEndSotd < SOTD_NOON && sotdNow > SOTD_NOON) {
+        timerEndSotd += SOTD_MAX;     // make timer end after midnight
+      }
+      const long remainingSec = (timerEndSotd > sotdNow) ? timerEndSotd - sotdNow : 0;
+
+      // check to see if timer setting should be updated as timer runs down
+      // if the timer setting doesn't match the time remaining by more than
+      // 60 seconds, then update it.
+      auto timer = id(spa_timer);
+      const long curTimerSettingMin = lroundf(timer->state);
+      if (curTimerSettingMin <= 0) {
+        return 0;             // timer is finished
+      }
+      const long curTimerSettingSec = curTimerSettingMin * 60;
+      long diff = (curTimerSettingSec - remainingSec);
+      diff = (diff < 0) ? -diff : diff;   // absolute value
+      //if (diff >= 60) {
+      //  TBD;
+      //}
+
+
+
+      return remainingSec;
+      //
+      //auto timer = id(spa_timer);
+      //const long curTimerSettingMin = lroundf(timer->state);
+      //const bool isTimerRunning = (curTimerSettingMin > 0);
+      //
+      //static float oldTimerSettingMin = 0;
+      //static unsigned long msTimerStartTime = 0;
+      //
+      ////--------------------------------------
+      //// if the timer setting changed, reset the start time
+      ////
+      //const bool timerSettingChanged = abs(oldTimerSettingMin - curTimerSettingMin) > 0.1;
+      //if (timerSettingChanged) {
+      //    oldTimerSettingMin = curTimerSettingMin;
+      //    msTimerStartTime = millis();
+      //    return curTimerSettingMin;    // timer was reset
+      //}
+      //
+      ////--------------------------------------
+      //// calculate timer's time remaining
+      ////
+      //const MilliSec msElapsed = millis() - msTimerStartTime;
+      //const float elapsedSecF = msElapsed / 1000.0;
+      //const float timerSecF = curTimerSettingMin * 60.0;
+      //float timeLeftSecF = (timerSecF > elapsedSecF) ? timerSecF - elapsedSecF : 0;
+      //ESP_LOGD("custom","----- SPA TIMER (%0.0f min), time left: %0.1f sec", curTimerSettingMin, timeLeftSecF);
+      //return timeLeftSecF / 60.0;     // time remaining
+    on_value:
+      lambda: |-
+        //ESP_LOGD("custom","----- SPA TIMER, time left: %0.0f sec", x);
+        //# auto timer = id(spa_timer);
+        //const float curTimerSettingMin = timer->state;
+        ////--------------------------------------
+        //// if timer ran out, reset timer to 0
+        ////
+        //const bool timerActive = curTimerSettingMin >= 0.1;
+        //const bool timerEnding = (x <= 0.1);
+        //if (timerActive && timerEnding) {
+        //    ESP_LOGD("custom","----- SPA TIMER: timer ended");
+        //    timer->publish_state(0);       // reset the timer to 0
+        //}
+
+
+#----------------------------------------------------------------------
+# PEAK CURRENT - keeps track of the valve actuator's peak currant usage
+# measured in amps. This is for diagnostic purposes.
+# https://esphome.io/components/sensor/custom.html
+#----------------------------------------------------------------------
+  # MODIFIED: platform is now 'peak_current'
+  - platform: peak_current
+    name: "Peak Current"
+    id: peak_current
+    accuracy_decimals: 2
+    unit_of_measurement: A
+    device_class: "current"
+    state_class: "measurement"
+
+#----------------------------------------------------------------------
+# ACTUATOR TIME
+#
+# Measures how long it takes for the valve actuator to
+# complete its actuation from open to closed or closed to open.
+# This is for diagnostic purposes.  Taking less than ~26 seconds means
+# the valve wasn't fully open/closed, taking longer could mean there
+# is a problem with turning the valve.  See also actuator current.
+#
+# https://esphome.io/components/sensor/custom.html
+#----------------------------------------------------------------------
+  # MODIFIED: platform is now 'actuation_time'
+  - platform: actuation_time
+    name: "Actuation Time"
+    id: actuation_time
+    accuracy_decimals: 1
+    unit_of_measurement: s
+    device_class: "duration"
+    state_class: "total_increasing"
+
+#----------------------------------------------------------------------
+# POOL PUMP RS-485 COMM
+#
+# This custom C++ class handles serial communications with the pump.
+# Gets the pump status and tells it when to speed up or slow down for
+# solar heating.  Status messages have RPM and Wattage usage which appear
+# in sensors here.  RPM is used to determine when the pump is actually
+# running.  Wattage is for diagnostic/info only.
+#
+# This class automatically polls the pump for status every 15 seconds.
+# It can also sends commands to set pump speed every 15 seconds. The
+# pump reverts to preprogrammed schedule or speed if we stop sending
+# the speed commands for longer than 30 seconds or so.
+#
+# Pump Run Hours - today's total hours where pump RPM > 1000 RPM
+#
+# https://esphome.io/components/sensor/custom.html
+#----------------------------------------------------------------------
+  # MODIFIED: platform is now 'pool_pump_rs485' and sensors are nested
+  - platform: pool_pump_rs485
+    id: pool_pump # NEW: Added an ID for the main component
+    uart_id: pump_uart_bus
+    rpm:
+      name: "RPM Sensor"
+      id: pump_rpm_sensor
+      # Properties like decimals and units are now defined in __init__.py or C++
+    watts:
+      name: "Watts Sensor"
+      id: pump_watts_sensor
+    flow:
+      name: "Flow Sensor"
+      id: pump_flow_sensor
+    power:
+      name: "Power Sensor"
+      id: pump_power_sensor
+    run_time:
+      name: "Pump Run Hours"
+      id: pump_run_hours
+    target_run_hours:
+      name: "Pump Target Hours"
+      id: pump_target_hours
+    run_hours_deficit:
+      name: "Pump Hours Deficit"
+      id: pump_hours_deficit
+
+#----------------------------------------------------------------------
+# WATER TEMPERATURE
+#
+# Water Temperature uses the Pipe Temperature NTC below.  The pipe
+# temperature
+# reading is NOT valid if the pump is off since water is not flowing
+# through the pipe and can cool off or heat up while sitting in the pipe.
+# The lambda checks if the pump is running before considering the
+# pipe temp to be a
+# valid water temperature.
+# This temperature is used to update the min/max temperatures.
+# https://esphome.io/components/sensor/template.html
+#----------------------------------------------------------------------
+  - platform: template
+    name: Water Temperature
+    id: water_temperature
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 1
+    update_interval: never
+    lambda: |-
+      if (id(pool_pump).isPipeTempValid()) {
+        const float x = id(pipe_temperature).state;
+        id(temp_estimator).setWaterTempC(x);
+        return x;
+      } else {
+        return NAN;
+      }
+    filters:
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 5
+    on_value:
+      lambda: |-
+        if (!std::isnan(x)) {
+            auto minTemp = id(minimum_water_temperature);
+            if (std::isnan(minTemp->state) || x < minTemp->state) {
+              // publish a new minimum water temperature
+              minTemp->publish_state(x);
+            }
+            auto maxTemp = id(maximum_water_temperature);
+            if (std::isnan(maxTemp->state) || x > maxTemp->state) {
+              // publish a new maximum water temperature
+              maxTemp->publish_state(x);
+            }
+        }
+
+# Water Temp Daily Minimum/Maximum sensor
+# https://esphome.io/components/sensor/template.html
+  - platform: template
+    name: Minimum Water Temperature
+    id: minimum_water_temperature
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 1
+    # NOTE: updates are done elsewhere:
+    # (1) midnight (resets min from current) in the time sntp above,
+    # (2) whenever the water_temperature sensor updates.
+    update_interval: never
+
+  - platform: template
+    name: Maximum Water Temperature
+    id: maximum_water_temperature
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 1
+    # NOTE: updates are done elsewhere:
+    # (1) midnight (resets min from current) in the time sntp above,
+    # (2) whenever the water_temperature sensor updates.
+    update_interval: never
+
+  # MODIFIED: platform is now 'temperature_estimator'
+  - platform: temperature_estimator
+    id: temp_estimator # NEW: Added an ID for the main component
+    estimated_water_temp: # NEW: This key is defined in the component's __init__.py
+      name: "Estimated Water Temp"
+      id: estimated_water_temp
+      accuracy_decimals: 1
+      unit_of_measurement: "°C"
+      device_class: "temperature"
+      state_class: "measurement"
+
+#----------------------------------------------------------------------
+# PIPE TEMPERATURE NTC
+#
+# Pipe Temperature NTC sensor is located in a pipe right next to the pump
+# output and it used to measure pool water temperature.
+#
+# https://esphome.io/components/sensor/ntc
+#----------------------------------------------------------------------
+  - platform: ntc
+    name: Pipe Temperature
+    id: pipe_temperature
+    sensor: water_thermistor
+    calibration:
+      - 15310Ohm -> 16°C
+      - 10000Ohm -> 25°C
+      - 3602Ohm -> 50°C
+    filters:
+      - offset: 0.20    # was: add 0.11 ºC based on calibration check
+    on_value:
+      then:
+        - component.update: water_temperature
+
+#----------------------------------------------------------------------
+# SOLAR PANEL TEMPERATURE NTC
+#
+# Solar Panel Thermistor sensor is located on the roof solar panels and
+# is used to determine if it is hot enough to heat the pool water.
+# https://esphome.io/components/sensor/ntc
+#----------------------------------------------------------------------
+  - platform: ntc
+    name: Panel Temperature
+    id: panel_temperature
+    sensor: panel_thermistor
+    calibration:
+      - 15310Ohm -> 16°C
+      - 10000Ohm -> 25°C
+      - 3602Ohm -> 50°C
+    filters:
+      - offset: 0.6
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 5
+    on_value:
+      then:
+        - lambda: 'id(temp_estimator).setPanelTempC(x);'
+
+#----------------------------------------------------------------------
+# RESISTANCE SENSORS for thermistor's voltage dividors
+#
+# Uses the ADC voltage reading to compute resistance value of the
+# corresponding thermistors.  This value is used above to compute
+# a temperature reading from the thermistors.
+# https://esphome.io/components/sensor/resistance
+#----------------------------------------------------------------------
+  - platform: resistance
+    internal: True
+    id: panel_thermistor
+    sensor: panel_thermistor_adc
+    configuration: DOWNSTREAM
+    resistor: 5.6kOhm
+    name: Panel Resistance Sensor
+    reference_voltage: 3.3V
+
+  - platform: resistance
+    internal: True
+    id: water_thermistor
+    sensor: water_thermistor_adc
+    configuration: DOWNSTREAM
+    resistor: 5.6kOhm
+    name: Water Resistance Sensor
+    reference_voltage: 3.3V
+
+#----------------------------------------------------------------------
+# ADC SENSORS FOR THERMISTORS
+#
+# Uses the ADC to measure voltage across thermister voltage dividers.
+# One to measure water temperature and one for solar panel temp.
+# https://esphome.io/components/sensor/adc
+#----------------------------------------------------------------------
+  - platform: adc
+    internal: True
+    id: panel_thermistor_adc
+    pin: GPIO33
+    name: Panel Thermistor ADC
+    update_interval: 60s
+    attenuation: 11db
+    filters:
+      - offset: -0.02
+
+  - platform: adc
+    internal: True
+    id: water_thermistor_adc
+    pin: GPIO32
+    name: Water Thermistor ADC
+    update_interval: 60s
+    attenuation: 11db
+    filters:
+      - offset: -0.02
+
+#----------------------------------------------------------------------
+# VALVE ACTUATOR CURRENT SENSOR
+#
+# The Valve Actuator Current sensor measures peak voltage across a shunt
+# resistor (1 ohm) from an AC sine wave (after half wave rectifier),
+# We measure peak voltage(amps) by charging a 10uF capacitor after the
+# rectifier which holds at the peak voltage.  There is a 22k resistor
+# on the capacitor so that the voltage reading will decay when
+# the actual current drops.  See schematic and design manual for details.
+# https://esphome.io/components/sensor/adc
+#----------------------------------------------------------------------
+  - platform: adc
+    pin: GPIO36
+    name: "Valve Actuator Current"
+    id: valve_actuator_amps
+    unit_of_measurement: A
+    device_class: "current"
+    state_class: "measurement"
+    accuracy_decimals: 2
+    attenuation: 6db
+# NOTE: update_interval of never here, but we manually update every 2-3s when
+#       the actuator power is on, if power is off, current *should* be zero.
+    update_interval: never
+    filters:
+      - lambda: |-
+          // NOTE1: if x < 0.15 then current is really 0, it reads 0.15 because
+          // the ADC has a minimum voltage that it reads and shows that value
+          // even when there is no current flowing (and actual voltage is 0)
+          // NOTE2: multiply by 0.707 to convert peak to RMS value, add
+          // another 0.095 to adjust based on 10/7/23 calibration w/multimeter.
+          if (x < 0.15) { return 0.0; } else { return (x * 0.707) + 0.095; }
+    on_value:
+      - lambda: 'id(valve_position).setCurrent(x);'
+
+  - platform: wifi_signal
+    name: "WiFi Signal dB"
+    id: wifi_signal_db
+    entity_category: "diagnostic"
+    update_interval: 120s
+
+  - platform: internal_temperature
+    name: "Internal Temperature"
+    entity_category: "diagnostic"
+
+#----------------------------------------------------------------------
+# The two relays are used to send 24 VAC power to the valve actuator.
+#
+# You only need to turn on one of the relays in order to open or close
+# the valve. The automations below handle the details including turning
+# the relays off when done.
+#   1. Turn on the valve_direction_relay to open the valve.
+#   2. Turn on the valve_power_relay to close the valve.
+#
+# VALVE POWER RELAY:
+#    * when ON provide 24 VAC power to the valve actuator, valve will
+#      not change direction or move at all unless this is on.
+#
+# VALVE DIRECTION RELAY:
+#    * when ON turns the valve to send water through the solar panels,
+#    * when OFF valve turns back to normal (bypass solar) position
+#
+# NOTE: valve actuation takes about 26 seconds to complete,
+#       actuator current drops to 0 when it finishes moving
+#
+# https://esphome.io/components/switch/gpio.html
+# https://devices.esphome.io/devices/Generic-Relay
+#----------------------------------------------------------------------
+switch:
+  - platform: gpio
+    name: "Valve Power Relay"
+    id: valve_power_relay
+    inverted: True
+    pin: GPIO23
+    on_turn_on:
+      then:
+        - lambda: |-
+            id(valve_position).setValvePowerRelayOn(true);
+        - repeat:
+            count: 32
+            then:
+              - delay: 0.5s
+              - component.update: valve_actuator_amps
+              - delay: 0.5s
+        - switch.turn_off: valve_power_relay
+    on_turn_off:
+      then:
+        - lambda: |-
+            id(valve_position).setValvePowerRelayOn(false);
+
+  - platform: gpio
+    name: "Valve Direction Relay"
+    id: valve_direction_relay
+    inverted: True
+    pin: GPIO22
+    on_turn_on:
+      then:
+        - lambda: |-
+            id(valve_position).setValveDirectionRelayOn(true);
+        - delay: 32s
+        # always turn off power before changing direction
+        - switch.turn_off: valve_power_relay
+        - switch.turn_off: valve_direction_relay
+    on_turn_off:
+      then:
+        - lambda: |-
+            id(valve_position).setValveDirectionRelayOn(false);
+
+  - platform: template
+    name: "Spa Mode"
+    id: spa_mode
+    optimistic: True
+    on_turn_on:
+      then:
+        - lambda: |-
+            ESP_LOGD("custom","^^^^^^^^^^^^^^^ SPA MODE ON ^^^^^^^^^^^^^^^");
+            const bool useSolar = id(use_solar_heat).state;
+            const long newPumpSpeed = id(pool_pump).pumpSpeedForSolar(useSolar);
+            /// TODO: UNCOMMENT THIS AFTER TESTING
+            ///id(pump_speed_request)->publish_state(newPumpSpeed);
+    on_turn_off:
+      then:
+        - lambda: |-
+            ESP_LOGD("custom","^^^^^^^^^^^^^^^ SPA MODE OFF ^^^^^^^^^^^^^^^");
+            const bool useSolar = id(use_solar_heat).state;
+            const long newPumpSpeed = id(pool_pump).pumpSpeedForSolar(useSolar);
+            /// TODO: UNCOMMENT THIS AFTER TESTING
+            ///id(pump_speed_request)->publish_state(newPumpSpeed);
+
+
+#----------------------------------------------------------------------
+# TIME - used to reset min/max temp at midnight
+# https://esphome.io/components/time/index.html
+#----------------------------------------------------------------------
+time:
+  - platform: sntp
+    id: local_sntp_time
+    on_time:
+      - seconds: 0
+        minutes: 0
+        hours: 0
+        then:
+          - lambda: |-
+              // at midnight, reset min/max to current waterTemp
+              const float waterTemp = id(water_temperature)->state;
+              id(minimum_water_temperature)->publish_state(waterTemp);
+              id(maximum_water_temperature)->publish_state(waterTemp);
+
+              // at midnight, reset pump run time to 0
+              auto& pumpTargetHrs = id(pump_target_run_hours);
+              auto& pumpActualHrs = id(pump_actual_run_hours);
+              int day = 2;       // start with last index
+              while (day >= 1) {
+                pumpActualHrs[day] = pumpActualHrs[day-1];
+                pumpTargetHrs[day] = pumpTargetHrs[day-1];
+                day--;
+              }
+              // zero out hours, a new day is starting
+              pumpActualHrs[0] = 0.0;
+              pumpTargetHrs[0] = 0.0;
+
