@@ -14,6 +14,13 @@
 // --- Class Declaration ---
 class PoolPumpRS485 : public Component, public UARTDevice {
 public:
+    // singleton access
+    static PoolPumpRS485* getInstance();
+
+    // --- SENSOR MEMBERS ---
+    // Public pointers to the sensor objects that we will manage.
+    // solarFlowSensor indicates if water should be circulating up to the solar panels
+
     // --- Public Members ---
     Sensor* rpmSensor = new Sensor();        // pool pump RPM
     Sensor* wattsSensor = new Sensor();        // pool pump power consumption
@@ -25,15 +32,19 @@ public:
     Sensor* runHoursDeficit = new Sensor(); // pump run hours deficit from past 2 days
 
     // --- Public Method Declarations ---
-    PoolPumpRS485(UARTComponent *parent);
+
     void setup() override;
     void loop() override;
+
     void requestPumpSpeed(long speed);
     long pumpSpeedForSolar(bool solarHeatOn);
     bool isPipeTempValid() const;
     void printDebugInfo();
 
 private:
+    // Constructor
+    PoolPumpRS485(UARTComponent *parent);       // singleton constructor
+
     // --- Private Members ---
     bool shouldRequestExtPgmOn = false;
     uint8_t shouldRequestExtPgmOff = 0;

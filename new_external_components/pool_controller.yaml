@@ -111,6 +111,11 @@ globals:
     initial_value: '-1'
     restore_value: yes
 
+  - id: spa_mode
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+
 #----------------------------------------------------------------------
 # CURRENT LIMIT
 # Current Limit is used to detect problems with the valve actuator.
@@ -822,24 +827,15 @@ switch:
     name: "Spa Mode"
     id: spa_mode
     optimistic: True
-    on_turn_on:
-      then:
-        - lambda: |-
-            ESP_LOGD("custom","^^^^^^^^^^^^^^^ SPA MODE ON ^^^^^^^^^^^^^^^");
-            const bool useSolar = id(use_solar_heat).state;
-            const long newPumpSpeed = id(pool_pump).pumpSpeedForSolar(useSolar);
-            /// TODO: UNCOMMENT THIS AFTER TESTING
-            ///id(pump_speed_request)->publish_state(newPumpSpeed);
-    on_turn_off:
-      then:
-        - lambda: |-
-            ESP_LOGD("custom","^^^^^^^^^^^^^^^ SPA MODE OFF ^^^^^^^^^^^^^^^");
-            const bool useSolar = id(use_solar_heat).state;
-            const long newPumpSpeed = id(pool_pump).pumpSpeedForSolar(useSolar);
-            /// TODO: UNCOMMENT THIS AFTER TESTING
-            ///id(pump_speed_request)->publish_state(newPumpSpeed);
-
-
+    turn_on_action:
+      - globals.set:
+          id: spa_mode
+          value: 'true'
+    turn_off_action:
+      - globals.set:
+          id: spa_mode
+          value: 'false'
+          
 #----------------------------------------------------------------------
 # TIME - used to reset min/max temp at midnight
 # https://esphome.io/components/time/index.html

@@ -7,16 +7,43 @@
 
 #include "pool_pump_rs485.h"
 
+PoolPumpRS485* PoolPumpRS485::getInstance() {
+    static PoolPumpRS485 instance;
+    return &instance;
+}
+
+// constructor
 PoolPumpRS485::PoolPumpRS485(UARTComponent *parent) : UARTDevice(parent) {}
 
 //
 // setup() -- one time setup
 //
 void PoolPumpRS485::setup() override {
-    // init a few things
-    msLastPumpPoll = millis();        // init time of "previous" polling interval
+    if (rpmSensor != nullptr) return;       // already set up
 
-    auto& pumpHrs = id(pump_actual_run_hours);
+    // init a few things
+    msLastPumpPoll = millis();              // init time of "previous" polling interval
+
+    // Create and register the sensors
+    rpmSensor = new Sensor();
+    wattsSensor = new Sensor();
+    flowSensor = new Sensor();
+    powerSensor = new Sensor();
+    runTimeSensor = new Sensor();
+    targetRunHours = new Sensor();
+    runHoursDeficit = new Sensor();
+
+    App.register_sensor(rpmSensor);
+    App.register_sensor(wattsSensor);
+    App.register_sensor(flowSensor);
+    App.register_sensor(powerSensor);
+    App.register_sensor(runTimeSensor);
+    App.register_sensor(targetRunHours);
+    App.register_sensor(runHoursDeficit);
+
+    // Register this component with ESPHome
+    App.register_component(this)
+
     runTimeSensor->publish_state( pumpHrs[0] );
 }
 

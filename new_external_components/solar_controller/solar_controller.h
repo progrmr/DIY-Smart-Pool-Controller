@@ -29,24 +29,23 @@ public:
 private:
     // Constructor
     SolarController();      // singleton constructor
-    static SolarController* instance{nullptr};
 
     // Type declarations
     enum class SolarFlowStates { unknown, idle, flowing };
 
     // track desired solar heat state
     //
-    MilliSec msDesiredFlowStateChanged = 0;
-    SolarFlowStates desiredFlowState = unknown;
+    MilliSec msDesiredFlowStateChanged{0};       // millis() time at desired flow change
+    SolarFlowStates desiredFlowState{unknown};
 
     // track solar heat state
     //
-    MilliSec msCurrentFlowStateChanged = 0;       // millis() time of last state change
-    SolarFlowStates currentFlowState = unknown;
+    MilliSec msCurrentFlowStateChanged{0};       // millis() time of last state change
+    SolarFlowStates currentFlowState{unknown};
 
     // track current switch and sensor readings
     //
-    MilliSec msMissingDataStarted = 0;          // millis() time of first missing data event
+    MilliSec msMissingDataStarted{0};            // millis() time of first missing data event
 
     // constants
     //

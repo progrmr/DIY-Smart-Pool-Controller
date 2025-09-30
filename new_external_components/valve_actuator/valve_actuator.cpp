@@ -2,8 +2,6 @@
 
 static const char *const TAG = "valve_position";
 
-ValveActuator* ValveActuator::instance = nullptr;
-
 ValveActuator* ValveActuator::getInstance() {
     static ValveActuator instance;
     return &instance;

@@ -46,7 +46,6 @@ public:
 private:
     // Constructor
     ValveActuator();                    // singleton constructor
-    static ValveActuator* instance{nullptr};
 
     // An enumeration to represent the possible states of the valve.
     enum class ValveStates {

@@ -7,8 +7,6 @@
 
 #include "temp_estimator.h"
 
-TemperatureEstimator* TemperatureEstimator::instance = nullptr;
-
 TemperatureEstimator* TemperatureEstimator::getInstance() {
     static TemperatureEstimator instance;
     return &instance;

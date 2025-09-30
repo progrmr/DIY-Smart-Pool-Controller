@@ -30,7 +30,6 @@ public:
 private:
     // Constructor
     TemperatureEstimator();     // singleton constructor
-    static TemperatureEstimator* instance{nullptr};
 
     // State tracking variables
     float panelTempC = NAN;

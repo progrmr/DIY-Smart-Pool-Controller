@@ -7,8 +7,7 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		B27137942E8AB4DC008A976A /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
-		B27137952E8AB4DC008A976A /* component.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = component.py; sourceTree = "<group>"; };
+		B27137952E8AB4DC008A976A /* component.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = component.yaml; sourceTree = "<group>"; };
 		B27137962E8AB4DC008A976A /* pool_pump_rs485.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = pool_pump_rs485.h; sourceTree = "<group>"; };
 		B27137972E8AB4DC008A976A /* pool_pump_rs485.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = pool_pump_rs485.cpp; sourceTree = "<group>"; };
 		B27137992E8AB4DC008A976A /* component.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = component.yaml; sourceTree = "<group>"; };
@@ -34,8 +33,7 @@
 		B27137982E8AB4DC008A976A /* pool_pump_rs485 */ = {
 			isa = PBXGroup;
 			children = (
-				B27137942E8AB4DC008A976A /* __init__.py */,
-				B27137952E8AB4DC008A976A /* component.py */,
+				B27137952E8AB4DC008A976A /* component.yaml */,
 				B27137962E8AB4DC008A976A /* pool_pump_rs485.h */,
 				B27137972E8AB4DC008A976A /* pool_pump_rs485.cpp */,
 			);

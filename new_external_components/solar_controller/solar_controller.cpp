@@ -6,11 +6,10 @@
 //
 
 #include "solar_controller.h"
+#include <string>
 
 extern bool spa_mode;
 extern time::SNTPComponent* local_sntp_time;
-
-SolarController* SolarController::instance = nullptr;
 
 SolarController* SolarController::getInstance() {
     static SolarController instance;
@@ -32,8 +31,8 @@ void SolarController::setup() override {
 
     // init times to now
     const MilliSec now = millis();
-    this->msDesiredFlowStateChanged = now;
-    this->msCurrentFlowStateChanged = now;
+    msDesiredFlowStateChanged = now;
+    msCurrentFlowStateChanged = now;
 
     // Publish the initial off state on startup
     solarFlowSensor->publish_state(false);
@@ -59,10 +58,10 @@ void SolarController::update() override {
     // Time Check: we don't want to run the pump from 1600-2100 local,
     // because that's SDGE peak rates (exception: allow if in Spa mode)
     //
-    if (!spa_mode) {
-        const auto timeNow = local_sntp_time->now();
-        const int hour = timeNow.hour;
+    const auto timeNow = local_sntp_time->now();
+    const int hour = timeNow.hour;
 
+    if (!spa_mode) {
         if (hour >= 16 && hour < 21) {
             ESP_LOGD("custom","----- SOLAR: OFF (%02d:%02d is peak rates)",
                      hour, timeNow.minute);
@@ -131,7 +130,7 @@ void SolarController::update() override {
     //
     SolarFlowStates newDesiredFlowState = unknown;
 
-    if (spaMode || (hour >= 8 && hour <= 19)) {
+    if (spaMode || (hour >= 8 && hour < 20)) {
         // evaluate whether we should enable solar heating
         newDesiredFlowState = evaluateHeat(spaMode, targetHeatTempF, waterTempF, panelTempF);
     } else {
@@ -161,12 +160,14 @@ void SolarController::setSolarFlowState(SolarFlowStates newState) {
         ESP_LOGD("custom","----- SOLAR: state changed to: %s", flowOn ? "ON" : "OFF");
         this->msCurrentFlowStateChanged = millis();
         this->currentFlowState = newState;
-        publish_state(flowOn);
+        if (solarFlowSensor != nullptr) {
+            solarFlowSensor->publish_state(flowOn);
+        }
     }
 }
 
 SolarFlowStates SolarController::evaluateCooling(bool spaMode, float targetTempF,
-                                                       float waterTempF, float panelTempF) const {
+                                                 float waterTempF, float panelTempF) const {
     float targetWaterTempF = targetTempF;
     if (waterTempF <= targetWaterTempF) {
         ESP_LOGD("custom","----- SOLAR: NO COOLING NEED (water %0.1f <= target %0.1f)",
