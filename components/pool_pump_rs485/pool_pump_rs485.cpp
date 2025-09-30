@@ -8,43 +8,25 @@
 #include "pool_pump_rs485.h"
 
 PoolPumpRS485* PoolPumpRS485::getInstance() {
-    static PoolPumpRS485 instance;
-    return &instance;
+    return instance_;
 }
 
 // constructor
-PoolPumpRS485::PoolPumpRS485(UARTComponent *parent) : UARTDevice(parent) {}
+PoolPumpRS485::PoolPumpRS485(UARTComponent *parent) : UARTDevice(parent) {
+    instance_ = this;
+}
 
 //
 // setup() -- one time setup
 //
 void PoolPumpRS485::setup() override {
-    if (rpmSensor != nullptr) return;       // already set up
-
     // init a few things
     msLastPumpPoll = millis();              // init time of "previous" polling interval
 
-    // Create and register the sensors
-    rpmSensor = new Sensor();
-    wattsSensor = new Sensor();
-    flowSensor = new Sensor();
-    powerSensor = new Sensor();
-    runTimeSensor = new Sensor();
-    targetRunHours = new Sensor();
-    runHoursDeficit = new Sensor();
-
-    App.register_sensor(rpmSensor);
-    App.register_sensor(wattsSensor);
-    App.register_sensor(flowSensor);
-    App.register_sensor(powerSensor);
-    App.register_sensor(runTimeSensor);
-    App.register_sensor(targetRunHours);
-    App.register_sensor(runHoursDeficit);
-
-    // Register this component with ESPHome
-    App.register_component(this)
-
-    runTimeSensor->publish_state( pumpHrs[0] );
+// TODO: get the global value for id(pump_actual_run_hours) and use that instead
+//    if (runTimeSensor_) {
+//        runTimeSensor_->publish_state( pumpHrs[0] );
+//    }
 }
 
 //
@@ -123,13 +105,13 @@ void PoolPumpRS485::loop() override {
             if (msgState != msgComplete) {
                 // check for timeouts before we continue waiting for incoming message
                 MilliSec msReplyWait = msNow - msReplyWaitStart;
-                if (msReplyWait >= ReplyTimeOutMS) {
+                if (msReplyWait >= ReplyTimeoutMS) {
                     // if we timed out on the pump status message, then report RPM as unknown
                     if (msgSequenceState == waitStatusReply) {
-                        rpmSensor->publish_state(NAN);
-                        wattsSensor->publish_state(NAN);
-                        flowSensor->publish_state(NAN);
-                        powerSensor->publish_state(NAN);
+                        rpmSensor_->publish_state(NAN);
+                        wattsSensor_->publish_state(NAN);
+                        flowSensor_->publish_state(NAN);
+                        powerSensor_->publish_state(NAN);
 
                         // reset the total run time counter for this polling cycle
                         msLastPumpStatusReply = 0;
@@ -221,7 +203,7 @@ void PoolPumpRS485::loop() override {
     //        }
 }
 
-const char* const PoolPumpRS485::seqImage(MsgSequencingStates state) {
+const char* const PoolPumpRS485::seqImage(MsgSequencingStates state) const {
     switch (state) {
         case sendSolarSpeedOn: return ("sendSolarSpeedOn");
         case waitSolarSpeedOn: return ("waitSolarSpeedOn");
@@ -269,8 +251,9 @@ void PoolPumpRS485::requestPumpSpeed(long speed) {
 // pumpSpeedForMode -- returns the correct pump speed setting given the
 //                     solar on/off setting and pool/spa mode setting
 //
-long PoolPumpRS485::pumpSpeedForSolar(bool solarHeatOn) {
-    if (id(spa_mode).state) {
+long PoolPumpRS485::pumpSpeedForSolar(bool solarHeatOn) const {
+    const bool spaMode = id(spa_mode).state;
+    if (spaMode) {
         return solarHeatOn ? pumpSpaSolarOn : pumpSpaSolarOff;
     } else {
         return solarHeatOn ? pumpPoolSolarOn : pumpPoolSolarOff;
@@ -296,7 +279,7 @@ void PoolPumpRS485::setNextPollToHappenIn(MilliSec duration) {
 //
 // gotMessageByte -- updates received message data according to state
 //
-MsgStates PoolPumpRS485::gotMessageByte(const uint8_t byte, const MsgStates msgState, Message* msg) {
+MsgStates PoolPumpRS485::gotMessageByte(const uint8_t byte, const MsgStates msgState, Message* msg) const {
     switch (msgState) {
         case expectStart:
             if (byte == 0xFF) {
@@ -370,7 +353,7 @@ MsgStates PoolPumpRS485::gotMessageByte(const uint8_t byte, const MsgStates msgS
 
 Message PoolPumpRS485::makeMessage(MsgActions action,
                                    uint8_t length,
-                                   const uint8_t* data) {
+                                   const uint8_t* data) const {
     Message msg;
     std::memset(&msg, 0, sizeof(msg));
 
@@ -394,15 +377,15 @@ Message PoolPumpRS485::makeMessage(MsgActions action,
 //
 // sendMessage -- send message via RS-485 serial to the pump
 //
-void PoolPumpRS485::sendMessage(const Message& msg) {
+void PoolPumpRS485::sendMessage(const Message& msg) const {
     // send data to the UART for RS-485 transmission to pump
     write_array(msgPreamble, sizeof(msgPreamble));
 
-    write(msg.prefix);
-    write(msg.protocolRev);
-    write(msg.dest);
-    write(msg.source);
-    write(msg.action);
+    write(static_cast<uint8_t>(msg.prefix));
+    write(static_cast<uint8_t>(msg.protocolRev));
+    write(static_cast<uint8_t>(msg.dest));
+    write(static_cast<uint8_t>(msg.source));
+    write(static_cast<uint8_t>(msg.action));
     write(msg.length);
 
     if (msg.length > 0) {
@@ -413,7 +396,7 @@ void PoolPumpRS485::sendMessage(const Message& msg) {
     write(msg.checksum & 0xFF);     // LSB
 }
 
-void PoolPumpRS485::printMessage(const Message& msg) {
+void PoolPumpRS485::printMessage(const Message& msg) const {
     char str[255];
 
     if (msg.source == PumpId && msg.dest == CtlrId) {
@@ -460,7 +443,7 @@ void PoolPumpRS485::printMessage(const Message& msg) {
 //
 // computeChecksum for message
 //
-const uint16_t PoolPumpRS485::checksumForMessage(const Message& msg) {
+uint16_t PoolPumpRS485::checksumForMessage(const Message& msg) const {
     uint16_t checksum = msg.prefix;
     checksum += uint16_t(msg.protocolRev);
     checksum += uint16_t(msg.dest);
@@ -474,7 +457,7 @@ const uint16_t PoolPumpRS485::checksumForMessage(const Message& msg) {
     return checksum;
 }
 
-bool PoolPumpRS485::isValidMessage(const Message& msg) {
+bool PoolPumpRS485::isValidMessage(const Message& msg) const {
     if (msg.source == CtlrId && msg.dest == CtlrId && msg.action == invalidAction) {
         return false;           // this message has been zeroed out due to timeout error
     }
@@ -500,22 +483,22 @@ void PoolPumpRS485::handlePumpStatusReply(const Message& msg) {
     //---------------------------
     if (curPumpRPM != lastPumpRPM) {
         // RPM changed, publish an update
-        rpmSensor->publish_state(curPumpRPM);
+        rpmSensor_->publish_state(curPumpRPM);
         lastPumpRPM = curPumpRPM;
     }
     if (abs(curPumpWatts-lastPumpWatts) >= 5) {
         // Watts changed, publish an update
-        wattsSensor->publish_state(curPumpWatts);
+        wattsSensor_->publish_state(curPumpWatts);
         lastPumpWatts = curPumpWatts;
     }
     if (curPumpFlow != lastPumpFlow) {
         // Flow changed, publish an update
-        flowSensor->publish_state(curPumpFlow);
+        flowSensor_->publish_state(curPumpFlow);
         lastPumpFlow = curPumpFlow;
     }
     if (curPumpPower != lastPumpPower) {
         // Power changed, publish an update
-        powerSensor->publish_state(curPumpPower);
+        powerSensor_->publish_state(curPumpPower);
         lastPumpPower = curPumpPower;
     }
 
@@ -551,7 +534,7 @@ void PoolPumpRS485::handlePumpStatusReply(const Message& msg) {
         savedPumpHrs[0] += secsCredit / 3600.0;
 
         // publish sensor value of pump hours
-        runTimeSensor->publish_state( savedPumpHrs[0] );
+        runTimeSensor_->publish_state( savedPumpHrs[0] );
     }
 
     msLastPumpStatusReply = msNow;  // start next period
@@ -596,7 +579,7 @@ void PoolPumpRS485::updatePumpHoursDeficit() {
     }
 
     if (nDaysHistory == 0) {
-        runHoursDeficit->publish_state(NAN);
+        runHoursDeficit_->publish_state(NAN);
         return;     // no history hours
     }
 
@@ -650,7 +633,7 @@ void PoolPumpRS485::updatePumpTargetHours() {
     }
 }
 
-float PoolPumpRS485::pumpHoursForWaterTempF(float waterTempF) {
+float PoolPumpRS485::pumpHoursForWaterTempF(float waterTempF) const {
     if (waterTempF >= 95) {
         return 12;      // 95+
     } else if (waterTempF >= 90) {
@@ -668,18 +651,18 @@ float PoolPumpRS485::pumpHoursForWaterTempF(float waterTempF) {
     }
 }
 
-bool PoolPumpRS485::isPipeTempValid() {
+bool PoolPumpRS485::isPipeTempValid() const {
     if (msPumpStartTime == 0) {
         return false;       // pump is not running
     }
     const MilliSec msElapsed = millis() - msPumpStartTime;
     const float secsPumpOn = msElapsed / 1000.0;
 
-    return secsPumpOn >= PIPE_TEMP_VALID_INTERVAL;
+    return secsPumpOn >= PIPE_TEMP_VALID_INTERVAL_S;
 }
 
 // called from yaml in a lambda, as desired to debug hours data
-void PoolPumpRS485::printDebugInfo() {
+void PoolPumpRS485::printDebugInfo() const {
     auto pumpTargetHrs = id(pump_target_run_hours);
     auto pumpActualHrs = id(pump_actual_run_hours);
 

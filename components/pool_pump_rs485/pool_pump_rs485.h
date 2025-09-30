@@ -17,33 +17,61 @@ public:
     // singleton access
     static PoolPumpRS485* getInstance();
 
-    // --- SENSOR MEMBERS ---
-    // Public pointers to the sensor objects that we will manage.
-    // solarFlowSensor indicates if water should be circulating up to the solar panels
-
-    // --- Public Members ---
-    Sensor* rpmSensor = new Sensor();        // pool pump RPM
-    Sensor* wattsSensor = new Sensor();        // pool pump power consumption
-    Sensor* flowSensor = new Sensor();      // pool pump flow rate gal/min
-    Sensor* powerSensor = new Sensor();     // pool pump % of max power
-
-    Sensor* runTimeSensor = new Sensor();   // today's total pump run time, in hours
-    Sensor* targetRunHours = new Sensor();  // hours pump should run per day
-    Sensor* runHoursDeficit = new Sensor(); // pump run hours deficit from past 2 days
-
-    // --- Public Method Declarations ---
-
     void setup() override;
     void loop() override;
 
+    // --- SETTERS ---
+    // Assigns the sensor object for pump RPM.
+    void set_rpm_sensor(Sensor* sensor) { this->rpmSensor_ = sensor; }
+    // Assigns the sensor object for pump power consumption in watts.
+    void set_watts_sensor(Sensor* sensor) { this->wattsSensor_ = sensor; }
+    // Assigns the sensor object for pump flow rate.
+    void set_flow_sensor(Sensor* sensor) { this->flowSensor_ = sensor; }
+    // Assigns the sensor object for pump power percentage.
+    void set_power_sensor(Sensor* sensor) { this->powerSensor_ = sensor; }
+    // Assigns the sensor object for today's total run time.
+    void set_run_time_sensor(Sensor* sensor) { this->runTimeSensor_ = sensor; }
+    // Assigns the sensor object for the daily target run hours.
+    void set_target_run_hours_sensor(Sensor* sensor) { this->targetRunHours_ = sensor; }
+    // Assigns the sensor object for the run hours deficit.
+    void set_run_hours_deficit_sensor(Sensor* sensor) { this->runHoursDeficit_ = sensor; }
+
+    // --- GETTERS ---
+    // Returns the sensor object for pump RPM.
+    Sensor* get_rpm_sensor() const { return this->rpmSensor_; }
+    // Returns the sensor object for pump power consumption in watts.
+    Sensor* get_watts_sensor() const { return this->wattsSensor_; }
+    // Returns the sensor object for pump flow rate.
+    Sensor* get_flow_sensor() const { return this->flowSensor_; }
+    // Returns the sensor object for pump power percentage.
+    Sensor* get_power_sensor() const { return this->powerSensor_; }
+    // Returns the sensor object for today's total run time.
+    Sensor* get_run_time_sensor() const { return this->runTimeSensor_; }
+    // Returns the sensor object for the daily target run hours.
+    Sensor* get_target_run_hours_sensor() const { return this->targetRunHours_; }
+    // Returns the sensor object for the run hours deficit.
+    Sensor* get_run_hours_deficit_sensor() const { return this->runHoursDeficit_; }
+
     void requestPumpSpeed(long speed);
-    long pumpSpeedForSolar(bool solarHeatOn);
+    long pumpSpeedForSolar(bool solarHeatOn) const;
     bool isPipeTempValid() const;
-    void printDebugInfo();
+    void printDebugInfo() const;
 
 private:
+    // --- SENSOR MEMBERS ---
+    // Private pointers to the sensor objects that we will manage.
+    Sensor* rpmSensor_{nullptr};            // pool pump RPM
+    Sensor* wattsSensor_{nullptr};          // pool pump power consumption
+    Sensor* flowSensor_{nullptr};           // pool pump flow rate gal/min
+    Sensor* powerSensor_{nullptr};          // pool pump % of max power
+
+    Sensor* runTimeSensor_{nullptr};        // today's total pump run time, in hours
+    Sensor* targetRunHours_{nullptr};       // hours pump should run per day
+    Sensor* runHoursDeficit_{nullptr};      // pump run hours deficit from past 2 days
+
     // Constructor
     PoolPumpRS485(UARTComponent *parent);       // singleton constructor
+    static inline PoolPumpRS485* instance_{nullptr};  // pointer to instance
 
     // --- Private Members ---
     bool shouldRequestExtPgmOn = false;
@@ -59,7 +87,7 @@ private:
     uint8_t lastPumpPower = 255;
 
     // RS-485 Message Sequencing States
-    enum class MsgSequencingStates {
+    enum MsgSequencingStates {
         sendSolarSpeedOn,    // send solarSpeedOn message (if applicable)
         waitSolarSpeedOn,    // wait for reply to solarSpeedOn message
         sendSolarSpeedOff,  // send solarSpeedOff message (if applicable)
@@ -72,7 +100,7 @@ private:
     //
     // RS-485 Message Parsing States for Pump and Controller
     //
-    enum class MsgStates {
+    enum MsgStates {
         expectStart,    // message starts with FF
         expectA5,        // got FF, wait for A5
         expect00,        // got A5, wait for 00
@@ -86,19 +114,19 @@ private:
         msgComplete
     };
 
-    enum class MsgPrefixes : uint8_t {
+    enum MsgPrefixes : uint8_t {
         mPrefixA5 = 0xA5,               // marks begin of message
         mProtocolRev0 = 0x00,            // protocol version?
     };
 
     // RS-485 Message source and destination ids
-    enum class MsgDeviceIds : uint8_t {
+    enum MsgDeviceIds : uint8_t {
         PumpId = 0x60,
         CtlrId = 0x10,
     };
 
     // RS-485 Message Actions (codes used by Intelliflo pump)
-    enum class MsgActions : uint8_t {
+    enum MsgActions : uint8_t {
         noAction = 0,
         rqstSetSpeed = 1,
         rqstEquipStatus = 2,
@@ -112,7 +140,7 @@ private:
 
     // specifies which of the "external programs" (stored in the pump settings)
     // to be run.
-    enum class MsgExternalPrograms : uint8_t {
+    enum MsgExternalPrograms : uint8_t {
         noExtProg = 0,
         extProg1 = 0x08,
         extProg2 = 0x10,
@@ -120,11 +148,11 @@ private:
         extProg4 = 0x20,
     };
 
-    enum class MsgPumpRegisters : uint16_t {
+    enum MsgPumpRegisters : uint16_t {
         programRegister = 0x0321,
     };
 
-    enum class PumpSpeedValues : uint16_t {
+    enum PumpSpeedValues : uint16_t {
         pumpSpeedBySked  =  999,    // set pump speed for pool, solar off
         pumpSpaSolarOff  = 1001,    // set pump speed for spa mode, solar off
         pumpPoolSolarOff = 2401,    // set pump speed for pool, solar off
@@ -176,8 +204,8 @@ private:
     static constexpr MilliSec ReplyTimeoutMS = 1000;
     static constexpr int MinPumpSpeed = 0;
     static constexpr int MaxPumpSpeed = 3000;
-    static constexpr int N_DAYS_PUMP_HISTORY = 3;
-    static constexpr int PIPE_TEMP_VALID_INTERVAL_S = 4 * 60;
+    static constexpr int NDaysPumpHistory = 3;
+    static constexpr int PIPE_TEMP_VALID_INTERVAL_S = 4 * 60;   // 4 minutes
 
     // --- Private Method Declarations ---
     void setNextPollToHappenIn(MilliSec duration);
@@ -193,8 +221,5 @@ private:
     void updatePumpHoursDeficit();
     void updatePumpTargetHours();
     float pumpHoursForWaterTempF(float waterTempF) const;
-
-    binary_sensor::BinarySensor *spa_mode_{nullptr};
-    sensor::Sensor *water_temperature_{nullptr};
 
 };

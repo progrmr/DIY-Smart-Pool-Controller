@@ -348,12 +348,8 @@ binary_sensor:
   - platform: template
     id: use_solar_heat
 
-automation:
-  - trigger:
-      - platform: state
-        entity_id: binary_sensor.use_solar_heat
-        to: 'on'
-    action:
+    # Action to run when the sensor turns ON (changes from off to on)
+    on_press:
       # bring pump to to speed, wait a bit, then turn valve to solar
       - lambda: |-
           ESP_LOGD("custom","^^^^^^^^^^^^^^^ Solar Heat ON ^^^^^^^^^^^^^^^");
@@ -367,11 +363,8 @@ automation:
       - switch.turn_on: valve_direction_relay
       - switch.turn_on: valve_power_relay
 
-  - trigger:
-      - platform: state
-        entity_id: binary_sensor.use_solar_heat
-        to: 'off'
-    action:
+    # Action to run when the sensor turns OFF (changes from on to off)
+    on_release:
       # set valve back to normal (closed) position
       # valve_power_relay on, with valve_direction_relay off, closes the valve
       # always set direction relay before turning on power
@@ -475,52 +468,6 @@ sensor:
         //    ESP_LOGD("custom","----- SPA TIMER: timer ended");
         //    timer->publish_state(0);       // reset the timer to 0
         //}
-
-
-#----------------------------------------------------------------------
-# POOL PUMP RS-485 COMM
-#
-# This custom C++ class handles serial communications with the pump.
-# Gets the pump status and tells it when to speed up or slow down for
-# solar heating.  Status messages have RPM and Wattage usage which appear
-# in sensors here.  RPM is used to determine when the pump is actually
-# running.  Wattage is for diagnostic/info only.
-#
-# This class automatically polls the pump for status every 15 seconds.
-# It can also sends commands to set pump speed every 15 seconds. The
-# pump reverts to preprogrammed schedule or speed if we stop sending
-# the speed commands for longer than 30 seconds or so.
-#
-# Pump Run Hours - today's total hours where pump RPM > 1000 RPM
-#
-# https://esphome.io/components/sensor/custom.html
-#----------------------------------------------------------------------
-  # MODIFIED: platform is now 'pool_pump_rs485' and sensors are nested
-  - platform: pool_pump_rs485
-    id: pool_pump # NEW: Added an ID for the main component
-    uart_id: pump_uart_bus
-    rpm:
-      name: "RPM Sensor"
-      id: pump_rpm_sensor
-      # Properties like decimals and units are now defined in __init__.py or C++
-    watts:
-      name: "Watts Sensor"
-      id: pump_watts_sensor
-    flow:
-      name: "Flow Sensor"
-      id: pump_flow_sensor
-    power:
-      name: "Power Sensor"
-      id: pump_power_sensor
-    run_time:
-      name: "Pump Run Hours"
-      id: pump_run_hours
-    target_run_hours:
-      name: "Pump Target Hours"
-      id: pump_target_hours
-    run_hours_deficit:
-      name: "Pump Hours Deficit"
-      id: pump_hours_deficit
 
 #----------------------------------------------------------------------
 # WATER TEMPERATURE
@@ -850,4 +797,58 @@ time:
               // zero out hours, a new day is starting
               pumpActualHrs[0] = 0.0;
               pumpTargetHrs[0] = 0.0;
+
+#----------------------------------------------------------------------
+# POOL PUMP RS-485 COMM
+#
+# This custom C++ class handles serial communications with the pump.
+# Gets the pump status and tells it when to speed up or slow down for
+# solar heating.  Status messages have RPM and Wattage usage which appear
+# in sensors here.  RPM is used to determine when the pump is actually
+# running.  Wattage is for diagnostic/info only.
+#
+# This class automatically polls the pump for status every 15 seconds.
+# It can also sends commands to set pump speed every 15 seconds. The
+# pump reverts to preprogrammed schedule or speed if we stop sending
+# the speed commands for longer than 30 seconds or so.
+#
+# Pump Run Hours - today's total hours where pump RPM > 1000 RPM
+#
+# https://esphome.io/components/sensor/custom.html
+#----------------------------------------------------------------------
+pool_pump_rs485:
+  id: pool_pump
+  uart_id: pump_uart_bus
+
+  # --- Sensor Definitions ---
+  # Using the exact name: and id: values from your original file
+  # to ensure compatibility with existing Home Assistant dashboards and automations.
+
+  rpm:
+    name: "RPM Sensor"
+    id: pump_rpm_sensor
+
+  watts:
+    name: "Watts Sensor"
+    id: pump_watts_sensor
+
+  flow:
+    name: "Flow Sensor"
+    id: pump_flow_sensor
+
+  power:
+    name: "Power Sensor"
+    id: pump_power_sensor
+
+  run_time:
+    name: "Pump Run Hours"
+    id: pump_run_hours
+
+  target_run_hours:
+    name: "Pump Target Hours"
+    id: pump_target_hours
+
+  run_hours_deficit:
+    name: "Pump Hours Deficit"
+    id: pump_hours_deficit
 
