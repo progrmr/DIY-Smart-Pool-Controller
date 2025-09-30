@@ -6,6 +6,7 @@
 //
 
 #include "temp_estimator.h"
+#include "esphome/core/log.h"
 
 TemperatureEstimator* TemperatureEstimator::getInstance() {
     static TemperatureEstimator instance;
@@ -13,18 +14,7 @@ TemperatureEstimator* TemperatureEstimator::getInstance() {
 }
 
 // constructor
-TemperatureEstimator::TemperatureEstimator() : PollingComponent(PollingIntervalSec * 1000) {}
-
-void TemperatureEstimator::setup() override {
-    if (sensor != nullptr) return;      // already set up
-
-    // Create and register the sensor
-    sensor = new Sensor();
-    App.register_sensor(sensor);
-
-    // Register this component with ESPHome
-    App.register_component(this);
-}
+TemperatureEstimator::TemperatureEstimator() : PollingComponent() {}
 
 void TemperatureEstimator::update() override {
     if (std::isnan(lastWaterTempC) || std::isnan(panelTempC)) {
@@ -52,8 +42,9 @@ void TemperatureEstimator::update() override {
 
             lastEstimateC = estimatedTempC(lastTempC, msLastTemp, panelTempC);
             msLastEstimate = msNow;
-            if (sensor) {
-                sensor->publish_state(lastEstimateC);
+
+            if (estimatedTempSensor_) {
+                estimatedTempSensor_->publish_state(lastEstimateC);
             }
         }
     }
@@ -108,8 +99,8 @@ void TemperatureEstimator::setWaterTempC(float newWaterTempC) {
         lastEstimateC = NAN;            // remove old estimate
         msLastEstimate = 0;             // no estimate
 
-        if (sensor) {
-            sensor->publish_state(newWaterTempC);
+        if (estimatedTempSensor_) {
+            estimatedTempSensor_->publish_state(newWaterTempC);
         }
     }
 }

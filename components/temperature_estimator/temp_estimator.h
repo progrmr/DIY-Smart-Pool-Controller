@@ -16,18 +16,25 @@ public:
     // singleton access
     static TemperatureEstimator* getInstance();
 
-    // --- SENSOR MEMBERS ---
-    // Public pointers to the sensor objects that we will manage.
-    Sensor *sensor = nullptr;
+    // --- PUBLIC GETTERS (Read-Only Access) ---
+    // Anyone can call these methods to get the current sensor pointers.
+    Sensor* get_estimatedTempSensor() const { return estimatedTempSensor_; }
+
+    // --- PUBLIC SETTERS (Needed for ESPHome Setup) ---
+    // These allow the ESPHome framework to link the sensors during startup.
+    void set_estimatedTempSensor(Sensor *s) { estimatedTempSensor_ = s; }
 
     // Method declarations
-    void setup() override;
     void update() override;
 
     void setPanelTempC(float newPanelTempC);
     void setWaterTempC(float newWaterTempC);
 
 private:
+    // --- SENSOR MEMBERS ---
+    // Public pointers to the sensor objects that we will manage.
+    Sensor *estimatedTempSensor_{nullptr};
+
     // Constructor
     TemperatureEstimator();     // singleton constructor
 
@@ -41,7 +48,6 @@ private:
     MilliSec msLastEstimate = 0;
 
     // constants
-    static constexpr int PollingIntervalSec{60};
     static constexpr int MaxWaterTempAgeSeconds{300};
     static constexpr float StdTempDropFPH{1.5/6.5};     // w 20ºF diff, pool lost 1.5º in 6.5 hrs
     static constexpr float StdTempDropFPH2{4.2/13.0};   // w 24ºF diff, pool lost 4.2º in 13 hrs

@@ -23,13 +23,13 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXFileReference section */
-		B27137952E8AB4DC008A976A /* component.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = component.yaml; sourceTree = "<group>"; };
+		B27137952E8AB4DC008A976A /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
 		B27137962E8AB4DC008A976A /* pool_pump_rs485.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = pool_pump_rs485.h; sourceTree = "<group>"; };
 		B27137972E8AB4DC008A976A /* pool_pump_rs485.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = pool_pump_rs485.cpp; sourceTree = "<group>"; };
-		B27137992E8AB4DC008A976A /* component.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = component.yaml; sourceTree = "<group>"; };
+		B27137992E8AB4DC008A976A /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
 		B271379B2E8AB4DC008A976A /* solar_controller.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = solar_controller.h; sourceTree = "<group>"; };
 		B271379C2E8AB4DC008A976A /* solar_controller.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = solar_controller.cpp; sourceTree = "<group>"; };
-		B271379E2E8AB4DC008A976A /* component.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = component.yaml; sourceTree = "<group>"; };
+		B271379E2E8AB4DC008A976A /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
 		B27137A02E8AB4DC008A976A /* temp_estimator.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = temp_estimator.h; sourceTree = "<group>"; };
 		B27137A12E8AB4DC008A976A /* temp_estimator.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = temp_estimator.cpp; sourceTree = "<group>"; };
 		B27137A52E8AB4DC008A976A /* valve_actuator.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = valve_actuator.h; sourceTree = "<group>"; };
@@ -49,7 +49,7 @@
 		B27137982E8AB4DC008A976A /* pool_pump_rs485 */ = {
 			isa = PBXGroup;
 			children = (
-				B27137952E8AB4DC008A976A /* component.yaml */,
+				B27137952E8AB4DC008A976A /* __init__.py */,
 				B27137962E8AB4DC008A976A /* pool_pump_rs485.h */,
 				B27137972E8AB4DC008A976A /* pool_pump_rs485.cpp */,
 			);
@@ -59,7 +59,7 @@
 		B271379D2E8AB4DC008A976A /* solar_controller */ = {
 			isa = PBXGroup;
 			children = (
-				B27137992E8AB4DC008A976A /* component.yaml */,
+				B27137992E8AB4DC008A976A /* __init__.py */,
 				B271379B2E8AB4DC008A976A /* solar_controller.h */,
 				B271379C2E8AB4DC008A976A /* solar_controller.cpp */,
 			);
@@ -69,7 +69,7 @@
 		B27137A22E8AB4DC008A976A /* temperature_estimator */ = {
 			isa = PBXGroup;
 			children = (
-				B271379E2E8AB4DC008A976A /* component.yaml */,
+				B271379E2E8AB4DC008A976A /* __init__.py */,
 				B27137A02E8AB4DC008A976A /* temp_estimator.h */,
 				B27137A12E8AB4DC008A976A /* temp_estimator.cpp */,
 			);
