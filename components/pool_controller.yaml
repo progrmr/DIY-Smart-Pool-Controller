@@ -337,40 +337,53 @@ valve_actuator:
 # within past 5 minutes.
 # https://esphome.io/components/binary_sensor/custom.html
 #----------------------------------------------------------------------
-binary_sensor:
-  # MODIFIED: platform is now 'solar_controller'
-  - platform: solar_controller
-    id: solar_ctrl # NEW: Added an ID for the main component
-    use_solar_heat: # NEW: This key is defined in the component's __init__.py
-      name: "Use Solar Heat"
-      id: use_solar_heat
-      on_press:
-        # bring pump to to speed, wait a bit, then turn valve to solar
-        - lambda: |-
-            ESP_LOGD("custom","^^^^^^^^^^^^^^^ Solar Heat ON ^^^^^^^^^^^^^^^");
-            const long newPumpSpeed = id(pool_pump).pumpSpeedForSolar(true);
-            id(pump_speed_request)->publish_state(newPumpSpeed);
-        # delay while pump is priming (if off), to let it get up to speed
-        - delay: 30s
-        # set valve to the solar (open) position
-        # valve_direction_relay on, opens the valve
-        # always set direction relay before turning on power
-        - switch.turn_on: valve_direction_relay
-        - switch.turn_on: valve_power_relay
+solar_controller:
+  solar_flow:
+    # This links the controller's output to the binary sensor above.
+    id: use_solar_heat
+    # This is the friendly name that will appear in Home Assistant.
+    name: "Pool Solar Flow"
 
-      on_release:
-        # set valve back to normal (closed) position
-        # valve_power_relay on, with valve_direction_relay off, closes the valve
-        # always set direction relay before turning on power
-        - switch.turn_off: valve_direction_relay
-        - switch.turn_on: valve_power_relay
-        # delay gives valve time to switch off (takes 26 sec)
-        - delay: 30s
-        # set pump back to normal speed
-        - lambda: |-
-            ESP_LOGD("custom","vvvvvvvvvvvvvvv Solar Heat OFF vvvvvvvvvvvvvvv");
-            const long newPumpSpeed = id(pool_pump).pumpSpeedForSolar(false);
-            id(pump_speed_request)->publish_state(newPumpSpeed);
+binary_sensor:
+  - platform: template
+    id: use_solar_heat
+
+automation:
+  - trigger:
+      - platform: state
+        entity_id: binary_sensor.use_solar_heat
+        to: 'on'
+    action:
+      # bring pump to to speed, wait a bit, then turn valve to solar
+      - lambda: |-
+          ESP_LOGD("custom","^^^^^^^^^^^^^^^ Solar Heat ON ^^^^^^^^^^^^^^^");
+          const long newPumpSpeed = id(pool_pump).pumpSpeedForSolar(true);
+          id(pump_speed_request)->publish_state(newPumpSpeed);
+      # delay while pump is priming (if off), to let it get up to speed
+      - delay: 30s
+      # set valve to the solar (open) position
+      # valve_direction_relay on, opens the valve
+      # always set direction relay before turning on power
+      - switch.turn_on: valve_direction_relay
+      - switch.turn_on: valve_power_relay
+
+  - trigger:
+      - platform: state
+        entity_id: binary_sensor.use_solar_heat
+        to: 'off'
+    action:
+      # set valve back to normal (closed) position
+      # valve_power_relay on, with valve_direction_relay off, closes the valve
+      # always set direction relay before turning on power
+      - switch.turn_off: valve_direction_relay
+      - switch.turn_on: valve_power_relay
+      # delay gives valve time to switch off (takes 26 sec)
+      - delay: 30s
+      # set pump back to normal speed
+      - lambda: |-
+          ESP_LOGD("custom","vvvvvvvvvvvvvvv Solar Heat OFF vvvvvvvvvvvvvvv");
+          const long newPumpSpeed = id(pool_pump).pumpSpeedForSolar(false);
+          id(pump_speed_request)->publish_state(newPumpSpeed);
 
 sensor:
 #----------------------------------------------------------------------
@@ -583,16 +596,10 @@ sensor:
     # (2) whenever the water_temperature sensor updates.
     update_interval: never
 
-  # MODIFIED: platform is now 'temperature_estimator'
   - platform: temperature_estimator
-    id: temp_estimator # NEW: Added an ID for the main component
-    estimated_water_temp: # NEW: This key is defined in the component's __init__.py
-      name: "Estimated Water Temp"
-      id: estimated_water_temp
-      accuracy_decimals: 1
-      unit_of_measurement: "°C"
-      device_class: "temperature"
-      state_class: "measurement"
+    name: "Estimated Water Temp"
+    # This ID is used for both the sensor entity and to target the component with actions.
+    id: estimated_water_temp
 
 #----------------------------------------------------------------------
 # PIPE TEMPERATURE NTC

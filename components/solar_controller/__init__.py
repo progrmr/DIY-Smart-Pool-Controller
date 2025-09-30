@@ -2,3 +2,71 @@
 #  __init__.py
 #  Pool Controller
 #
+"""Component to determine when to turn on/off the water flow to the solar panels."""
+
+import esphome.codegen as cg
+import esphome.config_validation as cv
+from esphome.components import binary_sensor
+from esphome.const import CONF_ID
+
+# This component relies on the 'time' component for SNTP time.
+DEPENDENCIES = ['time']
+
+# Although the C++ code is in the global namespace, we define a namespace
+# for the python config schema to keep things organized.
+solar_controller_ns = cg.esphome_ns.namespace('solar_controller')
+
+# Declare the C++ class from the global namespace.
+# SolarController is a PollingComponent.
+SolarController = cg.global_ns.class_('SolarController', cg.PollingComponent)
+
+# Define a key for our binary sensor in the YAML configuration.
+CONF_SOLAR_FLOW = 'solar_flow'
+
+# --- IMPORTANT ---
+# This custom component has several hard-coded dependencies in its C++ code
+# that are NOT managed by this python script. You MUST ensure the following
+# are available in your project for it to compile and run:
+#
+# 1. A header file named "common_types.h" that defines 'MilliSec' and 'CtoF'.
+# 2. A singleton class named 'PoolPumpRS485' available via PoolPumpRS485::getInstance().
+# 3. A global boolean variable: 'extern bool spa_mode;'.
+# 4. A global time component pointer: 'extern time::SNTPComponent* local_sntp_time;'.
+# 5. Several sensor/number IDs that must be defined in your YAML:
+#    - estimated_water_temp
+#    - panel_temperature
+#    - spa_target_temp
+#    - pool_target_temp
+#    - pool_cooling_target
+
+CONFIG_SCHEMA = cv.Schema({
+    # Generate an internal ID for a pointer to the singleton.
+    # We use this to register the singleton with ESPHome's core systems.
+    cv.GenerateID(): cv.declare_id(SolarController.operator('ptr')),
+    
+    # Define the binary_sensor that will be controlled by this component.
+    cv.Required(CONF_SOLAR_FLOW): binary_sensor.binary_sensor_schema(),
+
+}).extend(cv.polling_component_schema('30s')) # Component polls every 30 seconds by default.
+
+
+async def to_code(config):
+    """Generate the C++ code for this component."""
+    
+    # Add the include for the custom component's header file.
+    cg.add_include("solar_controller.h")
+    
+    # Get a pointer to the SolarController singleton instance.
+    # This generates: SolarController* ID = SolarController::getInstance();
+    var = cg.variable(config[CONF_ID], cg.RawExpression("SolarController::getInstance()"))
+
+    # Register the singleton as a polling component with ESPHome.
+    # This ensures its setup() and update() methods are called automatically.
+    await cg.register_component(var, config)
+
+    # Create the binary sensor defined in the YAML.
+    sens = await binary_sensor.new_binary_sensor(config[CONF_SOLAR_FLOW])
+    
+    # Link the created binary sensor to the controller instance.
+    # This generates: ID->set_solarFlowSensor(sens);
+    cg.add(var.set_solarFlowSensor(sens))

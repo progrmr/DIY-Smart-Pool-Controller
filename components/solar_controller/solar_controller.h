@@ -3,7 +3,7 @@
 //  Pool Controller
 //
 //  Created by Gary Morris on 2025-09-26.
-//  Refactored by Gemini AI 2025-09-26
+//  Refactored by Gemini AI 2025-09-30
 //
 
 #pragma once
@@ -17,31 +17,39 @@ public:
     // singleton access
     static SolarController* getInstance();
 
-    // --- SENSOR MEMBERS ---
-    // Public pointers to the sensor objects that we will manage.
-    // solarFlowSensor indicates if water should be circulating up to the solar panels
-    BinarySensor* solarFlowSensor{nullptr};
+    // --- PUBLIC GETTERS (Read-Only Access) ---
+    // Anyone can call these methods to get the current sensor pointers.
+    BinarySensor* get_solarFlowSensor() const { return solarFlowSensor_; }
+
+    // --- PUBLIC SETTERS (Needed for ESPHome Setup) ---
+    // These allow the ESPHome framework to link the sensors during startup.
+    void set_solarFlowSensor(BinarySensor *s) { solarFlowSensor_ = s; }
 
     // Method declarations
     void setup() override;
     void update() override;
 
 private:
+    // --- SENSOR MEMBERS ---
+    // Public pointers to the sensor objects that we will manage.
+    // solarFlowSensor indicates if water should be circulating up to the solar panels
+    BinarySensor* solarFlowSensor_{nullptr};
+
     // Constructor
     SolarController();      // singleton constructor
 
     // Type declarations
-    enum class SolarFlowStates { unknown, idle, flowing };
+    enum class FlowStates { unknown, idle, flowing };
 
     // track desired solar heat state
     //
     MilliSec msDesiredFlowStateChanged{0};       // millis() time at desired flow change
-    SolarFlowStates desiredFlowState{unknown};
+    FlowStates desiredFlowState{unknown};
 
     // track solar heat state
     //
     MilliSec msCurrentFlowStateChanged{0};       // millis() time of last state change
-    SolarFlowStates currentFlowState{unknown};
+    FlowStates currentFlowState{unknown};
 
     // track current switch and sensor readings
     //
@@ -65,10 +73,8 @@ private:
     static constexpr int MinimumDesiredChangeIntervalSecs{5*60}; // seconds, don't change solar more often, to avoid flipping the diverter valve back and forth (it takes 24s to change)
 
     // private method declarations
-    void setSolarFlowState(SolarFlowStates newState);
-    SolarFlowStates evaluateCooling(bool spaMode, float targetTempF,
-                                    float waterTempF, float panelTempF) const;
-    SolarFlowStates evaluateHeat(bool spaMode, float targetTempF,
-                                 float waterTempF, float panelTempF) const;
+    void setSolarFlowState(FlowStates newState);
+    FlowStates evaluateCooling(bool spaMode, float targetTempF, float waterTempF, float panelTempF) const;
+    FlowStates evaluateHeat(bool spaMode, float targetTempF, float waterTempF, float panelTempF) const;
 };
 

@@ -15,6 +15,7 @@ from esphome.const import (
     UNIT_CELSIUS,
     ICON_THERMOMETER,
     DEVICE_CLASS_TEMPERATURE,
+    STATE_CLASS_MEASUREMENT,
 )
 from esphome.automation import ACTION_REGISTRY
 
@@ -31,6 +32,7 @@ PLATFORM_SCHEMA = (
         icon=ICON_THERMOMETER,
         accuracy_decimals=1,
         device_class=DEVICE_CLASS_TEMPERATURE,
+        state_class=STATE_CLASS_MEASUREMENT,
     )
     .extend(
         {
@@ -105,5 +107,3 @@ async def set_water_temp_action_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_ID])
     value = await cg.templatable(config[CONF_VALUE], args, float)
     return paren.setWaterTempC(value)
-
-
