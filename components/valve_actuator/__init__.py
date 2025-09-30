@@ -15,7 +15,6 @@ from esphome.const import (
     UNIT_SECOND,
     ICON_CURRENT_AC,
     ICON_TIMER,
-    ICON_VALVE,
 )
 
 # Define a namespace for your C++ code to avoid naming conflicts
@@ -52,7 +51,7 @@ CONFIG_SCHEMA = cv.Schema(
 
         # Define the 'valve_position' text sensor. It's optional.
         cv.Optional(CONF_VALVE_POSITION): text_sensor.text_sensor_schema(
-            icon=ICON_VALVE,
+            icon="mdi:valve",
         ),
     }
 ).extend(cv.COMPONENT_SCHEMA)
