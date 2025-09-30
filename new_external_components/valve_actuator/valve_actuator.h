@@ -30,11 +30,18 @@ public:
     // singleton access
     static ValveActuator* getInstance();
 
-    // --- SENSOR MEMBERS ---
-    // Public pointers to the sensor objects that we will manage.
-    Sensor *peakCurrentSensor{nullptr};
-    Sensor *actuationTimeSensor{nullptr};
-    TextSensor *valvePositionSensor{nullptr};
+    // --- PUBLIC GETTERS (Read-Only Access) ---
+    // Anyone can call these methods to get the current sensor pointers.
+    // The 'const' at the end means the method doesn't change the object's state.
+    Sensor* get_peakCurrentSensor() const { return peakCurrentSensor_; }
+    Sensor* get_actuationTimeSensor() const { return actuationTimeSensor_; }
+    TextSensor* get_valvePositionSensor() const { return valvePositionSensor_; }
+
+    // --- PUBLIC SETTERS (Needed for ESPHome Setup) ---
+    // These allow the ESPHome framework to link the sensors during startup.
+    void set_peakCurrentSensor(Sensor *s) { peakCurrentSensor_ = s; }
+    void set_actuationTimeSensor(Sensor *s) { actuationTimeSensor_ = s; }
+    void set_valvePositionSensor(TextSensor *s) { valvePositionSensor_ = s; }
 
     // Method declarations
     void setup() override;
@@ -44,6 +51,12 @@ public:
     void setCurrent(float amps);
 
 private:
+    // --- PRIVATE MEMBER VARIABLES ---
+    // These can now only be directly written to by methods within the ValveActuator class.
+    Sensor *peakCurrentSensor_{nullptr};
+    Sensor *actuationTimeSensor_{nullptr};
+    TextSensor *valvePositionSensor_{nullptr};
+
     // Constructor
     ValveActuator();                    // singleton constructor
 
@@ -63,7 +76,7 @@ private:
     bool valvePowerRelayOn = false;        // relay enables power to valve actuator
     bool valveDirectionRelayOn = false;    // relay controls valve turning direction
 
-    ValveStates valveState = valveUnknown; // current valve position state
+    ValveStates valveState = ValveStates::valveUnknown; // current valve position
     MilliSec valveStateTime = 0;           // time of last valveState change
 
     float peakCurrent{0.0};             // peak actuator current in amps

@@ -16,7 +16,6 @@
 		B271379E2E8AB4DC008A976A /* component.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = component.yaml; sourceTree = "<group>"; };
 		B27137A02E8AB4DC008A976A /* temp_estimator.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = temp_estimator.h; sourceTree = "<group>"; };
 		B27137A12E8AB4DC008A976A /* temp_estimator.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = temp_estimator.cpp; sourceTree = "<group>"; };
-		B27137A32E8AB4DC008A976A /* component.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = component.yaml; sourceTree = "<group>"; };
 		B27137A52E8AB4DC008A976A /* valve_actuator.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = valve_actuator.h; sourceTree = "<group>"; };
 		B27137A62E8AB4DC008A976A /* valve_actuator.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = valve_actuator.cpp; sourceTree = "<group>"; };
 		B27137A82E8AB4DC008A976A /* common_types.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = common_types.h; sourceTree = "<group>"; };
@@ -27,6 +26,7 @@
 		B27137AF2E8AB4DC008A976A /* valve_actuator.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = valve_actuator.h; sourceTree = "<group>"; };
 		B27137B12E8ABA45008A976A /* README.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = README.txt; sourceTree = "<group>"; };
 		B27137B42E8AD608008A976A /* pool_controller.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = pool_controller.yaml; sourceTree = "<group>"; };
+		B27137B52E8C385F008A976A /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -63,7 +63,7 @@
 		B27137A72E8AB4DC008A976A /* valve_actuator */ = {
 			isa = PBXGroup;
 			children = (
-				B27137A32E8AB4DC008A976A /* component.yaml */,
+				B27137B52E8C385F008A976A /* __init__.py */,
 				B27137A52E8AB4DC008A976A /* valve_actuator.h */,
 				B27137A62E8AB4DC008A976A /* valve_actuator.cpp */,
 			);

@@ -1,3 +1,5 @@
+# updated 9/29/25
+
 substitutions:
   devicename: esphome-pool-controller
   friendly_devicename: "ESPHome Pool Controller"
@@ -23,17 +25,6 @@ esphome:
             ESP_LOGD("custom","===== BOOT: restoring requestPumpSpeed RPM %ld", speed);
             id(pool_pump).requestPumpSpeed(speed);
           }
-      - delay: 5s
-      - lambda: |-
-          //---------------------
-          // need to init various sensors, they don't get
-          // restored after a reboot
-          //---------------------
-          id(valve_actuator_amps)->publish_state(0);
-          id(peak_current)->publish_state(0);
-          id(actuation_time)->publish_state(0);
-          //id(pump_run_hours)->publish_state(0);
-          //id(pump_target_hours)->publish_state(8);
       - delay: 15s
       - lambda: |-
           uint32_t notConnectedCount = 0;
@@ -45,16 +36,19 @@ esphome:
             }
           }
 
-# NEW: This block registers all your custom components.
 external_components:
-  - source: ./components
-    components:
-      - valve_position
-      - solar_controller
-      - peak_current
-      - actuation_time
-      - pool_pump_rs485
-      - temperature_estimator
+  - source:
+      type: local
+      path: new_external_components/valve_actuator
+  - source:
+      type: local
+      path: new_external_components/temperature_estimator
+  - source:
+      type: local
+      path: new_external_components/solar_controller
+  - source:
+      type: local
+      path: new_external_components/pool_pump_rs485
 
 esp32:
   board: esp32dev
@@ -295,22 +289,46 @@ number:
             }
 
 #----------------------------------------------------------------------
-# VALVE POSITION (SOLAR)
+# VALVE ACTUATOR (SOLAR)
 #
-# Valve Position can be:  unknown, opening, closing, opened, closed
+# Valve Actuator can be:  unknown, opening, closing, opened, closed
 # It is initially unknown, but changes based on the relay states etc.
 # It is set inside the ValvePosition class.
 #
 # https://esphome.io/components/text_sensor/custom.html
 #----------------------------------------------------------------------
-text_sensor:
-  # MODIFIED: platform is now 'valve_position'
-  - platform: valve_position
+valve_actuator:
+  id: valve_actuator_component  # ID for the main component/controller
+
+  # Defines the text sensor for valve position
+  valve_position:
     name: "Valve Position"
-    id: valve_position # This ID now refers to both the component and the text_sensor
-    on_value:
-      then:
-        - lambda: 'id(solar_ctrl).setValvePosition(x);'
+
+#----------------------------------------------------------------------
+# PEAK CURRENT - keeps track of the valve actuator's peak currant usage
+# measured in amps. This is for diagnostic purposes.  High peak current
+# could mean a water leak inside the valve from a bad seal.  It should
+# not be operated if current is abnormally high.  The original valve
+# melted some traces on its circuit board due to a water leak.
+# https://esphome.io/components/sensor/custom.html
+#----------------------------------------------------------------------
+  peak_current:
+    name: "Peak Current"
+
+#----------------------------------------------------------------------
+# ACTUATION TIME
+#
+# Measures how long it takes for the valve actuator to
+# complete its actuation from open to closed or closed to open.
+# This is for diagnostic purposes.  Taking less than ~25 seconds means
+# the valve wasn't fully open/closed, taking longer could mean there
+# is a problem with turning the valve.  See also actuator current and
+# peak current to diagnose problems with valve operation.
+#
+# https://esphome.io/components/sensor/custom.html
+#----------------------------------------------------------------------
+  actuation_time:
+    name: "Actuation Time"
 
 #----------------------------------------------------------------------
 # SOLAR CONTROLLER
@@ -452,40 +470,6 @@ sensor:
         //    timer->publish_state(0);       // reset the timer to 0
         //}
 
-
-#----------------------------------------------------------------------
-# PEAK CURRENT - keeps track of the valve actuator's peak currant usage
-# measured in amps. This is for diagnostic purposes.
-# https://esphome.io/components/sensor/custom.html
-#----------------------------------------------------------------------
-  # MODIFIED: platform is now 'peak_current'
-  - platform: peak_current
-    name: "Peak Current"
-    id: peak_current
-    accuracy_decimals: 2
-    unit_of_measurement: A
-    device_class: "current"
-    state_class: "measurement"
-
-#----------------------------------------------------------------------
-# ACTUATOR TIME
-#
-# Measures how long it takes for the valve actuator to
-# complete its actuation from open to closed or closed to open.
-# This is for diagnostic purposes.  Taking less than ~26 seconds means
-# the valve wasn't fully open/closed, taking longer could mean there
-# is a problem with turning the valve.  See also actuator current.
-#
-# https://esphome.io/components/sensor/custom.html
-#----------------------------------------------------------------------
-  # MODIFIED: platform is now 'actuation_time'
-  - platform: actuation_time
-    name: "Actuation Time"
-    id: actuation_time
-    accuracy_decimals: 1
-    unit_of_measurement: s
-    device_class: "duration"
-    state_class: "total_increasing"
 
 #----------------------------------------------------------------------
 # POOL PUMP RS-485 COMM
@@ -748,7 +732,7 @@ sensor:
           // another 0.095 to adjust based on 10/7/23 calibration w/multimeter.
           if (x < 0.15) { return 0.0; } else { return (x * 0.707) + 0.095; }
     on_value:
-      - lambda: 'id(valve_position).setCurrent(x);'
+      - lambda: 'id(valve_actuator).setCurrent(x);'
 
   - platform: wifi_signal
     name: "WiFi Signal dB"
@@ -792,7 +776,7 @@ switch:
     on_turn_on:
       then:
         - lambda: |-
-            id(valve_position).setValvePowerRelayOn(true);
+            id(valve_actuator).setValvePowerRelayOn(true);
         - repeat:
             count: 32
             then:
@@ -803,7 +787,7 @@ switch:
     on_turn_off:
       then:
         - lambda: |-
-            id(valve_position).setValvePowerRelayOn(false);
+            id(valve_actuator).setValvePowerRelayOn(false);
 
   - platform: gpio
     name: "Valve Direction Relay"
@@ -813,7 +797,7 @@ switch:
     on_turn_on:
       then:
         - lambda: |-
-            id(valve_position).setValveDirectionRelayOn(true);
+            id(valve_actuator).setValveDirectionRelayOn(true);
         - delay: 32s
         # always turn off power before changing direction
         - switch.turn_off: valve_power_relay
@@ -821,7 +805,7 @@ switch:
     on_turn_off:
       then:
         - lambda: |-
-            id(valve_position).setValveDirectionRelayOn(false);
+            id(valve_actuator).setValveDirectionRelayOn(false);
 
   - platform: template
     name: "Spa Mode"

@@ -1,6 +1,8 @@
 #include "valve_actuator.h"
+#include "esphome/core/preferences.h"
 
 static const char *const TAG = "valve_position";
+static const char* const PREF_KEY = "valve_actuator_state";
 
 ValveActuator* ValveActuator::getInstance() {
     static ValveActuator instance;
@@ -11,31 +13,39 @@ ValveActuator* ValveActuator::getInstance() {
 ValveActuator::ValveActuator() {}
 
 void ValveActuator::setup() override {
-    if (valvePositionSensor != nullptr) return;       // already set up
+    // Create a preferences object
+    auto prefs = global_preferences->make_preference<uint32_t>(PREF_KEY);
 
-    // Create and register the sensors
-    peakCurrentSensor = new Sensor();
-    actuationTimeSensor = new Sensor();
-    valvePositionSensor = new TextSensor();
+    uint32_t saved_state;
+    // Attempt to load the saved value from flash
+    if (prefs.load(&saved_state)) {
+        // If successful, cast the integer back to your enum and set the state
+        valveState = static_cast<ValveStates>(saved_state);
+        ESP_LOGD(TAG, "Restored valve state from flash: %s", valveStateText());
+    } else {
+        valveState = ValveStates::valveUnknown;
+    }
 
-    App.register_sensor(peakCurrentSensor);
-    App.register_sensor(actuationTimeSensor);
-    App.register_sensor(valvePositionSensor);
-
-    // Register this component with ESPHome
-    App.register_component(this)
-
-    // Publish the initial unknown state on startup
-    valvePosition->publish_state(valveStateText(valveState));
+    // Publish the initial sensor states on startup
+    if (valvePositionSensor_ != nullptr) {
+        valvePositionSensor_->publish_state(valveStateText());
+    }
+    if (peakCurrentSensor_ != nullptr) {
+        peakCurrentSensor_->publish_state(peakCurrent);
+    }
+    if (actuationTimeSensor_ != nullptr) {
+        actuationTimeSensor_->publish_state(0);
+    }
 }
 
-const char *ValveActuator::valveStateText(ValveStates state) const {
-    switch (state) {
-        case valveClosed:  return "closed";
-        case valveOpening: return "opening";
-        case valveOpened:  return "opened";
-        case valveClosing: return "closing";
-        default:           return "unknown";
+const char *ValveActuator::valveStateText() const {
+    switch (valveState) {
+        case ValveStates::valveClosed:  return "closed";
+        case ValveStates::valveOpening: return "opening";
+        case ValveStates::valveOpened:  return "opened";
+        case ValveStates::valveClosing: return "closing";
+        default:
+            return "unknown";
     }
 }
 
@@ -44,14 +54,14 @@ const char *ValveActuator::valveStateText(ValveStates state) const {
 //
 void ValveActuator::setPeakCurrent(float amps) {
     peakCurrent = amps;
-    if (peakCurrentSensor != nullptr) {
-        peakCurrentSensor->publish_state(amps);
+    if (peakCurrentSensor_ != nullptr) {
+        peakCurrentSensor_->publish_state(amps);
     }
 }
 
 void ValveActuator::setActuationTime(float seconds) {
-    if (actuationTimeSensor != nullptr) {
-        actuationTimeSensor->publish_state(seconds);
+    if (actuationTimeSensor_ != nullptr) {
+        actuationTimeSensor_->publish_state(seconds);
     }
 }
 
@@ -59,8 +69,20 @@ void ValveActuator::setValveState(ValveStates newState) {
     if (newState != valveState) {
         valveStateTime = millis();
         valveState = newState;
-        valvePositionSensor->publish_state(valveStateText(newState));
-        ESP_LOGD(TAG, "Valve state changed to: %s", valveStateText(newState));
+        if (valvePositionSensor_ != nullptr) {
+            valvePositionSensor_->publish_state(valveStateText());
+        }
+        ESP_LOGD(TAG, "Valve state changed to: %s", valveStateText());
+
+        // only write state to flash if it is opened || closed, the other
+        // states are transient and it is not needed to write those to flash,
+        // (which wears out the flash drive too)
+        if (newState == ValveStates::valveClosed || newState == ValveStates::valveOpened) {
+            // Create a preferences object and save the new state to flash
+            auto prefs = global_preferences->make_preference<uint32_t>(PREF_KEY);
+            // Cast the enum to an integer for saving
+            prefs.save(static_cast<uint32_t>(valveState));
+        }
     }
 }
 
@@ -76,7 +98,7 @@ void ValveActuator::setValvePowerRelayOn(bool relayOn) {
 
             // update valve state based on turning direction
             // actuator power is on, set one of the moving states based on direction
-            setValveState(valveDirectionRelayOn ? valveOpening : valveClosing);
+            setValveState(valveDirectionRelayOn ? ValveStates::valveOpening : ValveStates::valveClosing);
         }
     }
 }
@@ -89,7 +111,7 @@ void ValveActuator::setValveDirectionRelayOn(bool relayOn) {
         if (valvePowerRelayOn) {
             // actuator changed direction while power was on,
             // this really should not happen but update the direction
-            setValveState(valveDirectionRelayOn ? valveOpening : valveClosing);
+            setValveState(valveDirectionRelayOn ? ValveStates::valveOpening : ValveStates::valveClosing);
         }
     }
 }
@@ -111,19 +133,19 @@ void ValveActuator::setCurrent(float amps) {
         // we have current, actuator is moving, update state
         ESP_LOGD(TAG,"----- actuator current %0.3f, valve is %s, elapsed: %0.1fs",
                  amps, valveDirectionRelayOn ? "OPENING" : "CLOSING", secInState);
-        setValveState(valveDirectionRelayOn ? valveOpening : valveClosing);
+        setValveState(valveDirectionRelayOn ? ValveStates::valveOpening : ValveStates::valveClosing);
 
     } else {
         // no actuator current, actuator stopped by its limit switch (or power relay off)
-        if (valveState == valveOpening) {
+        if (valveState == ValveStates::valveOpening) {
             ESP_LOGD(TAG,"----- actuator current 0 while OPENING, valve OPENED, elapsed: %0.1fs", secInState);
             setActuationTime(secInState);
-            setValveState( valveOpened );
+            setValveState( ValveStates::valveOpened );
 
-        } else if (valveState == valveClosing) {
+        } else if (valveState == ValveStates::valveClosing) {
             ESP_LOGD(TAG,"----- actuator current 0 while CLOSING, valve CLOSED, elapsed: %0.1fs", secInState);
             setActuationTime(secInState);
-            setValveState( valveClosed );
+            setValveState( ValveStates::valveClosed );
         }
     }
 }
