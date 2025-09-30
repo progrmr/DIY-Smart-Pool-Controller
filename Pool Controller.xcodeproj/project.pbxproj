@@ -6,6 +6,22 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXAggregateTarget section */
+		B22CAAA12E8C5FE800F5B894 /* Pool Controller */ = {
+			isa = PBXAggregateTarget;
+			buildConfigurationList = B22CAAA22E8C5FE800F5B894 /* Build configuration list for PBXAggregateTarget "Pool Controller" */;
+			buildPhases = (
+				B22CAAA52E8C60AC00F5B894 /* ShellScript */,
+			);
+			dependencies = (
+			);
+			name = "Pool Controller";
+			packageProductDependencies = (
+			);
+			productName = "Pool Controller";
+		};
+/* End PBXAggregateTarget section */
+
 /* Begin PBXFileReference section */
 		B27137952E8AB4DC008A976A /* component.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = component.yaml; sourceTree = "<group>"; };
 		B27137962E8AB4DC008A976A /* pool_pump_rs485.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = pool_pump_rs485.h; sourceTree = "<group>"; };
@@ -70,7 +86,7 @@
 			path = valve_actuator;
 			sourceTree = "<group>";
 		};
-		B27137AA2E8AB4DC008A976A /* new_external_components */ = {
+		B27137AA2E8AB4DC008A976A /* components */ = {
 			isa = PBXGroup;
 			children = (
 				B27137B42E8AD608008A976A /* pool_controller.yaml */,
@@ -81,7 +97,7 @@
 				B27137A22E8AB4DC008A976A /* temperature_estimator */,
 				B27137A72E8AB4DC008A976A /* valve_actuator */,
 			);
-			path = new_external_components;
+			path = components;
 			sourceTree = "<group>";
 		};
 		B27137B02E8AB4DC008A976A /* old_custom_components */ = {
@@ -100,7 +116,7 @@
 			isa = PBXGroup;
 			children = (
 				B27137B02E8AB4DC008A976A /* old_custom_components */,
-				B27137AA2E8AB4DC008A976A /* new_external_components */,
+				B27137AA2E8AB4DC008A976A /* components */,
 			);
 			sourceTree = "<group>";
 		};
@@ -112,6 +128,11 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastUpgradeCheck = 1640;
+				TargetAttributes = {
+					B22CAAA12E8C5FE800F5B894 = {
+						CreatedOnToolsVersion = 16.4;
+					};
+				};
 			};
 			buildConfigurationList = B2A719132E8773D8003D3245 /* Build configuration list for PBXProject "Pool Controller" */;
 			developmentRegion = en;
@@ -126,11 +147,51 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				B22CAAA12E8C5FE800F5B894 /* Pool Controller */,
 			);
 		};
 /* End PBXProject section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		B22CAAA52E8C60AC00F5B894 /* ShellScript */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# =============================================================\n# ESPHome File Sync Script for Xcode\n# =============================================================\n\n# ‼️ IMPORTANT: Change this to the exact path of your mounted HA esphome folder\nHA_ESPHOME_DIR=\"/Volumes/config/esphome\"\n\n# ‼️ IMPORTANT: List the names of your component folders here\nCOMPONENTS=(\"solar_controller\" \"valve_actuator\" \"temperature_estimator\" \"pool_pump_rs485\")\n\n\n# --- Script starts here, no more editing needed ---\n\necho \"🚀 Starting ESPHome file sync...\"\n\n# Verify the destination directory exists\nif [ ! -d \"$HA_ESPHOME_DIR\" ]; then\n  echo \"❌ Error: Destination directory not found at $HA_ESPHOME_DIR\"\n  echo \"Please ensure your Home Assistant share is mounted correctly.\"\n  exit 1\nfi\n\n# Use the Xcode environment variable for the project's root directory\nSOURCE_DIR=\"$PROJECT_DIR\"\n\n# 1. Copy the main YAML file\necho \"➡️ Copying main YAML file...\"\ncp -v \"$SOURCE_DIR/components/pool_controller.yaml\" \"$HA_ESPHOME_DIR/\"\n\n# 2. Copy each component\nfor component in \"${COMPONENTS[@]}\"\ndo\n  echo \"➡️ Copying component: $component...\"\n  \n  # Create the destination component directory if it doesn't exist\n  mkdir -p \"$HA_ESPHOME_DIR/components/$component\"\n  \n  # Copy all files from the source component directory to the destination\n  # This will copy the .h, .cpp, and __init__.py files\n  cp -v \"$SOURCE_DIR/components/$component/\"* \"$HA_ESPHOME_DIR/components/$component/\"\ndone\n\necho \"✅ Sync complete! Files are ready on your Home Assistant machine.\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin XCBuildConfiguration section */
+		B22CAAA32E8C5FE800F5B894 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = G69KC2U64D;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		B22CAAA42E8C5FE800F5B894 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = G69KC2U64D;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
 		B2A719142E8773D8003D3245 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -146,6 +207,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		B22CAAA22E8C5FE800F5B894 /* Build configuration list for PBXAggregateTarget "Pool Controller" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B22CAAA32E8C5FE800F5B894 /* Debug */,
+				B22CAAA42E8C5FE800F5B894 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		B2A719132E8773D8003D3245 /* Build configuration list for PBXProject "Pool Controller" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

@@ -1,4 +1,4 @@
-# updated 9/29/25
+# updated 9/30/25 garym -- fix components path
 
 substitutions:
   devicename: esphome-pool-controller
@@ -37,7 +37,7 @@ esphome:
           }
 
 external_components:
-  - source: ./new_external_components 
+  - source: ./components
     components:
       - valve_actuator
       - solar_controller
