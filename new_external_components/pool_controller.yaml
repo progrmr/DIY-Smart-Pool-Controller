@@ -37,18 +37,12 @@ esphome:
           }
 
 external_components:
-  - source:
-      type: local
-      path: new_external_components/valve_actuator
-  - source:
-      type: local
-      path: new_external_components/temperature_estimator
-  - source:
-      type: local
-      path: new_external_components/solar_controller
-  - source:
-      type: local
-      path: new_external_components/pool_pump_rs485
+  - source: ./new_external_components 
+    components:
+      - valve_actuator
+      - solar_controller
+      - temperature_estimator
+      - pool_pump_rs485
 
 esp32:
   board: esp32dev
@@ -80,8 +74,8 @@ wifi:
 
 #----------------------------------------------------------------------
 # UART is used for RS-485 serial comm with the Pentair Pool Pump
-# the PoolPumpRS485 custom component class handles the actual
-# sending and receiving messages via the RS-485 serial port.
+# the PoolPumpRS485 (pool_pump_rs485) custom component class handles the
+# actual sending and receiving messages via the RS-485 serial port.
 #----------------------------------------------------------------------
 uart:
   id: pump_uart_bus
@@ -94,6 +88,7 @@ globals:
     type: float[3]
     initial_value: '{0,0,0}'
     restore_value: yes
+
   - id: pump_target_run_hours
     type: float[3]
     initial_value: '{0,0,0}'
@@ -289,11 +284,12 @@ number:
             }
 
 #----------------------------------------------------------------------
-# VALVE ACTUATOR (SOLAR)
+# VALVE ACTUATOR (SOLAR WATER CIRCULATION VALVE)
 #
-# Valve Actuator can be:  unknown, opening, closing, opened, closed
-# It is initially unknown, but changes based on the relay states etc.
-# It is set inside the ValvePosition class.
+# It is set inside the ValvePosition class.  It has 3 sensors:
+#   - valve_position: text sensor
+#   - peak_current: maximum current draw in amps
+#   - actuation_time: seconds it took from to fully open or closed
 #
 # https://esphome.io/components/text_sensor/custom.html
 #----------------------------------------------------------------------
@@ -301,32 +297,29 @@ valve_actuator:
   id: valve_actuator_component  # ID for the main component/controller
 
   # Defines the text sensor for valve position
+  # Valve Actuator can be:  unknown, opening, closing, opened, closed
+  # It is initially unknown, but changes based on the relay states etc.
   valve_position:
     name: "Valve Position"
 
-#----------------------------------------------------------------------
-# PEAK CURRENT - keeps track of the valve actuator's peak currant usage
-# measured in amps. This is for diagnostic purposes.  High peak current
-# could mean a water leak inside the valve from a bad seal.  It should
-# not be operated if current is abnormally high.  The original valve
-# melted some traces on its circuit board due to a water leak.
-# https://esphome.io/components/sensor/custom.html
-#----------------------------------------------------------------------
+  # PEAK CURRENT - keeps track of the valve actuator's peak currant usage
+  # measured in amps. This is for diagnostic purposes.  High peak current
+  # could mean a water leak inside the valve from a bad seal.  It should
+  # not be operated if current is abnormally high.  The original valve
+  # melted some traces on its circuit board due to a water leak.
+  # https://esphome.io/components/sensor/custom.html
   peak_current:
     name: "Peak Current"
 
-#----------------------------------------------------------------------
-# ACTUATION TIME
-#
-# Measures how long it takes for the valve actuator to
-# complete its actuation from open to closed or closed to open.
-# This is for diagnostic purposes.  Taking less than ~25 seconds means
-# the valve wasn't fully open/closed, taking longer could mean there
-# is a problem with turning the valve.  See also actuator current and
-# peak current to diagnose problems with valve operation.
-#
-# https://esphome.io/components/sensor/custom.html
-#----------------------------------------------------------------------
+  # ACTUATION TIME
+  #
+  # Measures how long it takes for the valve actuator to
+  # complete its actuation from open to closed or closed to open.
+  # This is for diagnostic purposes.  Taking less than ~25 seconds means
+  # the valve wasn't fully open/closed, taking longer could mean there
+  # is a problem with turning the valve.  See also actuator current and
+  # peak current to diagnose problems with valve operation.
+  # https://esphome.io/components/sensor/custom.html
   actuation_time:
     name: "Actuation Time"
 
