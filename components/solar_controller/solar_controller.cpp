@@ -9,7 +9,6 @@
 #include "esphome/core/preferences.h"
 #include <string>
 
-extern bool spa_mode;
 extern time::SNTPComponent* local_sntp_time;
 
 static const char* const PREF_KEY = "solar_flow_state";
@@ -66,7 +65,7 @@ void SolarController::update() override {
     // Check to see if the pump is running.  For now, we will not try to start
     // the pump here.  We only will enable solar heat if the pump is already
     // running and all the other conditions are met.
-    auto pumpRPMSensor = PoolPumpRS485::getInstance()->rpmSensor;
+    auto pumpRPMSensor = id(pump_rpm_sensor)
     const float pumpRPM = pumpRPMSensor.has_state() ? pumpRPMSensor.state : NAN;
     if (std::isnan(pumpRPM)) {
         // pump RPM not available, leave solar state unchanged
@@ -78,6 +77,9 @@ void SolarController::update() override {
         setSolarFlowState(FlowStates::idle);
         return;
     }
+
+    // spa mode affects which temperature settings we use
+    const bool spa_mode = id(spa_mode).state;
 
     // Time Check: we don't want to run the pump from 1600-2100 local,
     // because that's SDGE peak rates (exception: allow if in Spa mode)

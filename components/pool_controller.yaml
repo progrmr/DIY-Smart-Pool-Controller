@@ -745,7 +745,8 @@ switch:
   - platform: template
     name: "Spa Mode"
     id: spa_mode
-    restore_mode: RESTORE_AND_CALL
+    # TODO: restore_mode should be RESTORE_AND_CALL
+    restore_mode: RESTORE_DEFAULT_OFF
     optimistic: True
 
 #----------------------------------------------------------------------
