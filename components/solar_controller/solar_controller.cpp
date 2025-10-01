@@ -12,6 +12,7 @@
 extern time::SNTPComponent* local_sntp_time;
 
 static const char* const PREF_KEY = "solar_flow_state";
+static const char *const TAG = "solar_controller";
 
 SolarController* SolarController::getInstance() {
     static SolarController instance;

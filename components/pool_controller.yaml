@@ -289,12 +289,11 @@ number:
 # https://esphome.io/components/text_sensor/custom.html
 #----------------------------------------------------------------------
 valve_actuator:
-  id: valve_actuator_component  # ID for the main component/controller
-
   # Defines the text sensor for valve position
   # Valve Actuator can be:  unknown, opening, closing, opened, closed
   # It is initially unknown, but changes based on the relay states etc.
   valve_position:
+    id: valve_position
     name: "Valve Position"
 
   # PEAK CURRENT - keeps track of the valve actuator's peak currant usage
@@ -304,6 +303,7 @@ valve_actuator:
   # melted some traces on its circuit board due to a water leak.
   # https://esphome.io/components/sensor/custom.html
   peak_current:
+    id: peak_current
     name: "Peak Current"
 
   # ACTUATION TIME
@@ -316,6 +316,7 @@ valve_actuator:
   # peak current to diagnose problems with valve operation.
   # https://esphome.io/components/sensor/custom.html
   actuation_time:
+    id: actuation_time
     name: "Actuation Time"
 
 #----------------------------------------------------------------------
@@ -336,7 +337,7 @@ solar_controller:
   solar_flow:
     # This defines the binary sensor
     id: use_solar_heat
-    name: "Pool Solar Flow"
+    name: "Use Solar Heat"
 
     # Actions are attached directly to it
     on_press:
