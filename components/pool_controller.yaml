@@ -23,7 +23,7 @@ esphome:
           if (!std::isnan(pumpSpeedRequest)) {
             long speed = lroundf(pumpSpeedRequest);
             ESP_LOGD("custom","===== BOOT: restoring requestPumpSpeed RPM %ld", speed);
-            id(pool_pump).requestPumpSpeed(speed);
+            PoolPumpRS485::getInstance()->requestPumpSpeed(speed);
           }
       - delay: 15s
       - lambda: |-
@@ -153,7 +153,7 @@ number:
       - lambda: |-
           const long speed = lroundf(x);
           ESP_LOGD("custom","===== set new requestPumpSpeed RPM: %ld", speed);
-          id(pool_pump).requestPumpSpeed(speed);
+          PoolPumpRS485::getInstance()->requestPumpSpeed(speed);
 
 #----------------------------------------------------------------------
 # POOL HEAT TARGET TEMPERATURE
@@ -216,7 +216,7 @@ number:
     initial_value: 100
     on_value:
       then:
-        - lambda: 'id(pool_pump).printDebugInfo();'
+        - lambda: 'PoolPumpRS485::getInstance()->printDebugInfo();'
 
 #----------------------------------------------------------------------
 # SPA TIMER
@@ -344,7 +344,7 @@ solar_controller:
       # bring pump to speed, wait a bit, then turn valve to solar
       - lambda: |-
           ESP_LOGD("custom","^^^^^^^^^^^^^^^ Solar Heat ON ^^^^^^^^^^^^^^^");
-          const long newPumpSpeed = id(pool_pump).pumpSpeedForSolar(true);
+          const long newPumpSpeed = PoolPumpRS485::getInstance()->pumpSpeedForSolar(true);
           id(pump_speed_request)->publish_state(newPumpSpeed);
       # delay while pump is priming (if off), to let it get up to speed
       - delay: 30s
@@ -361,7 +361,7 @@ solar_controller:
       # set pump back to normal speed
       - lambda: |-
           ESP_LOGD("custom","vvvvvvvvvvvvvvv Solar Heat OFF vvvvvvvvvvvvvvv");
-          const long newPumpSpeed = id(pool_pump).pumpSpeedForSolar(false);
+          const long newPumpSpeed = PoolPumpRS485::getInstance()->pumpSpeedForSolar(false);
           id(pump_speed_request)->publish_state(newPumpSpeed);
 
 pool_temp_estimator:
@@ -485,9 +485,10 @@ sensor:
     accuracy_decimals: 1
     update_interval: never
     lambda: |-
-      if (id(pool_pump).isPipeTempValid()) {
+      auto pump = PoolPumpRS485::getInstance()
+      if (pump->isPipeTempValid()) {
         const float x = id(pipe_temperature).state;
-        id(pool_temp_estimator_hub).setWaterTempC(x);
+        PoolTempEstimator::getInstance()->setWaterTempC(x);
         return x;
       } else {
         return NAN;
@@ -581,7 +582,7 @@ sensor:
           send_every: 5
     on_value:
       then:
-        - lambda: 'id(pool_temp_estimator_hub).setPanelTempC(x);'
+        - lambda: 'PoolTempEstimater::getInstance()->setPanelTempC(x);'
 
 #----------------------------------------------------------------------
 # RESISTANCE SENSORS for thermistor's voltage dividors
