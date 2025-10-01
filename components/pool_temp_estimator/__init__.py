@@ -47,6 +47,9 @@ CONFIG_SCHEMA = cv.All(
 async def to_code(config):
     """Generate the C++ code for the PoolTempEstimator component."""
     var = cg.add_global(PoolTempEstimator.getInstance())
+    if var is None:
+        return  # <-- This is the correct check
+
     await cg.register_component(var, config)
 
     if conf_sensor := config.get(CONF_ESTIMATED_TEMPERATURE):

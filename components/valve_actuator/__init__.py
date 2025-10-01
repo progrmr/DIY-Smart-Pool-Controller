@@ -45,7 +45,9 @@ async def to_code(config):
     # Use the modern, high-level helper for singletons.
     # This automatically handles includes and variable declaration.
     var = cg.add_global(ValveActuator.getInstance())
-    
+    if var is None:
+        return  # <-- This is the correct check
+
     await cg.register_component(var, config)
 
     if CONF_PEAK_CURRENT in config:

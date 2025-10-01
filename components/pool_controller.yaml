@@ -668,7 +668,7 @@ sensor:
           // another 0.095 to adjust based on 10/7/23 calibration w/multimeter.
           if (x < 0.15) { return 0.0; } else { return (x * 0.707) + 0.095; }
     on_value:
-      - lambda: 'id(valve_actuator_component).setCurrent(x);'
+      - lambda: 'ValveActuator::getInstance()->setCurrent(x);'
 
   - platform: wifi_signal
     name: "WiFi Signal dB"
@@ -712,7 +712,7 @@ switch:
     on_turn_on:
       then:
         - lambda: |-
-            id(valve_actuator_component).setValvePowerRelayOn(true);
+            ValveActuator::getInstance()->setValvePowerRelayOn(true);
         - repeat:
             count: 32
             then:
@@ -723,7 +723,7 @@ switch:
     on_turn_off:
       then:
         - lambda: |-
-            id(valve_actuator_component).setValvePowerRelayOn(false);
+            ValveActuator::getInstance()->setValvePowerRelayOn(false);
 
   - platform: gpio
     name: "Valve Direction Relay"
@@ -733,7 +733,7 @@ switch:
     on_turn_on:
       then:
         - lambda: |-
-            id(valve_actuator_component).setValveDirectionRelayOn(true);
+            ValveActuator::getInstance()->setValveDirectionRelayOn(true);
         - delay: 32s
         # always turn off power before changing direction
         - switch.turn_off: valve_power_relay
@@ -741,7 +741,7 @@ switch:
     on_turn_off:
       then:
         - lambda: |-
-            id(valve_actuator_component).setValveDirectionRelayOn(false);
+            ValveActuator::getInstance()->setValveDirectionRelayOn(false);
 
   - platform: template
     name: "Spa Mode"

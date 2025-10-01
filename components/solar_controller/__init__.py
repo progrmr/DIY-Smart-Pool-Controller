@@ -23,6 +23,8 @@ async def to_code(config):
     # This single line replaces the manual variable creation and include.
     # It gets the singleton instance and registers it as a global variable.
     var = cg.add_global(SolarController.getInstance())
+    if var is None:
+        return  # <-- This is the correct check
 
     # Register it as a component so its setup() and loop() are called.
     await cg.register_component(var, config)
