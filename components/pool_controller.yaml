@@ -41,7 +41,7 @@ external_components:
     components:
       - valve_actuator
       - solar_controller
-      - temperature_estimator
+      - pool_temp_estimator
       - pool_pump_rs485
 
 esp32:
@@ -99,11 +99,6 @@ globals:
     type: long
     initial_value: '-1'
     restore_value: yes
-
-  - id: spa_mode
-    type: bool
-    restore_value: true
-    initial_value: 'false'
 
 #----------------------------------------------------------------------
 # CURRENT LIMIT
@@ -339,18 +334,13 @@ valve_actuator:
 #----------------------------------------------------------------------
 solar_controller:
   solar_flow:
-    # This links the controller's output to the binary sensor above.
+    # This defines the binary sensor
     id: use_solar_heat
-    # This is the friendly name that will appear in Home Assistant.
     name: "Pool Solar Flow"
 
-binary_sensor:
-  - platform: template
-    id: use_solar_heat
-
-    # Action to run when the sensor turns ON (changes from off to on)
+    # Actions are attached directly to it
     on_press:
-      # bring pump to to speed, wait a bit, then turn valve to solar
+      # bring pump to speed, wait a bit, then turn valve to solar
       - lambda: |-
           ESP_LOGD("custom","^^^^^^^^^^^^^^^ Solar Heat ON ^^^^^^^^^^^^^^^");
           const long newPumpSpeed = id(pool_pump).pumpSpeedForSolar(true);
@@ -358,16 +348,11 @@ binary_sensor:
       # delay while pump is priming (if off), to let it get up to speed
       - delay: 30s
       # set valve to the solar (open) position
-      # valve_direction_relay on, opens the valve
-      # always set direction relay before turning on power
       - switch.turn_on: valve_direction_relay
       - switch.turn_on: valve_power_relay
 
-    # Action to run when the sensor turns OFF (changes from on to off)
     on_release:
       # set valve back to normal (closed) position
-      # valve_power_relay on, with valve_direction_relay off, closes the valve
-      # always set direction relay before turning on power
       - switch.turn_off: valve_direction_relay
       - switch.turn_on: valve_power_relay
       # delay gives valve time to switch off (takes 26 sec)
@@ -378,6 +363,14 @@ binary_sensor:
           const long newPumpSpeed = id(pool_pump).pumpSpeedForSolar(false);
           id(pump_speed_request)->publish_state(newPumpSpeed);
 
+pool_temp_estimator:
+  id: pool_temp_estimator_hub  # An ID for the main component
+  update_interval: 1min
+  estimated_temperature:
+    # This is where the sensor is defined
+    id: estimated_water_temp
+    name: "Estimated Water Temp"
+
 sensor:
 #----------------------------------------------------------------------
 # SPA TIME REMAINING -- count down display of the time remaining
@@ -385,7 +378,7 @@ sensor:
 # which shuts off the spa.
 #----------------------------------------------------------------------
   - platform: template
-    name: Spa Time Remaining
+    name: "Spa Time Remaining"
     id: spa_time_remaining
     unit_of_measurement: "s"
     accuracy_decimals: 0
@@ -493,7 +486,7 @@ sensor:
     lambda: |-
       if (id(pool_pump).isPipeTempValid()) {
         const float x = id(pipe_temperature).state;
-        id(temp_estimator).setWaterTempC(x);
+        id(pool_temp_estimator_hub).setWaterTempC(x);
         return x;
       } else {
         return NAN;
@@ -543,11 +536,6 @@ sensor:
     # (2) whenever the water_temperature sensor updates.
     update_interval: never
 
-  - platform: temperature_estimator
-    name: "Estimated Water Temp"
-    # This ID is used for both the sensor entity and to target the component with actions.
-    id: estimated_water_temp
-
 #----------------------------------------------------------------------
 # PIPE TEMPERATURE NTC
 #
@@ -592,7 +580,7 @@ sensor:
           send_every: 5
     on_value:
       then:
-        - lambda: 'id(temp_estimator).setPanelTempC(x);'
+        - lambda: 'id(pool_temp_estimator_hub).setPanelTempC(x);'
 
 #----------------------------------------------------------------------
 # RESISTANCE SENSORS for thermistor's voltage dividors
@@ -633,7 +621,7 @@ sensor:
     pin: GPIO33
     name: Panel Thermistor ADC
     update_interval: 60s
-    attenuation: 11db
+    attenuation: 12db
     filters:
       - offset: -0.02
 
@@ -643,7 +631,7 @@ sensor:
     pin: GPIO32
     name: Water Thermistor ADC
     update_interval: 60s
-    attenuation: 11db
+    attenuation: 12db
     filters:
       - offset: -0.02
 
@@ -679,7 +667,7 @@ sensor:
           // another 0.095 to adjust based on 10/7/23 calibration w/multimeter.
           if (x < 0.15) { return 0.0; } else { return (x * 0.707) + 0.095; }
     on_value:
-      - lambda: 'id(valve_actuator).setCurrent(x);'
+      - lambda: 'id(valve_actuator_component).setCurrent(x);'
 
   - platform: wifi_signal
     name: "WiFi Signal dB"
@@ -723,7 +711,7 @@ switch:
     on_turn_on:
       then:
         - lambda: |-
-            id(valve_actuator).setValvePowerRelayOn(true);
+            id(valve_actuator_component).setValvePowerRelayOn(true);
         - repeat:
             count: 32
             then:
@@ -734,7 +722,7 @@ switch:
     on_turn_off:
       then:
         - lambda: |-
-            id(valve_actuator).setValvePowerRelayOn(false);
+            id(valve_actuator_component).setValvePowerRelayOn(false);
 
   - platform: gpio
     name: "Valve Direction Relay"
@@ -744,7 +732,7 @@ switch:
     on_turn_on:
       then:
         - lambda: |-
-            id(valve_actuator).setValveDirectionRelayOn(true);
+            id(valve_actuator_component).setValveDirectionRelayOn(true);
         - delay: 32s
         # always turn off power before changing direction
         - switch.turn_off: valve_power_relay
@@ -752,21 +740,14 @@ switch:
     on_turn_off:
       then:
         - lambda: |-
-            id(valve_actuator).setValveDirectionRelayOn(false);
+            id(valve_actuator_component).setValveDirectionRelayOn(false);
 
   - platform: template
     name: "Spa Mode"
     id: spa_mode
+    restore_mode: RESTORE_AND_CALL
     optimistic: True
-    turn_on_action:
-      - globals.set:
-          id: spa_mode
-          value: 'true'
-    turn_off_action:
-      - globals.set:
-          id: spa_mode
-          value: 'false'
-          
+
 #----------------------------------------------------------------------
 # TIME - used to reset min/max temp at midnight
 # https://esphome.io/components/time/index.html
@@ -823,8 +804,7 @@ pool_pump_rs485:
   # --- Sensor Definitions ---
   # Using the exact name: and id: values from your original file
   # to ensure compatibility with existing Home Assistant dashboards and automations.
-
-  rpm:
+  speed:
     name: "RPM Sensor"
     id: pump_rpm_sensor
 

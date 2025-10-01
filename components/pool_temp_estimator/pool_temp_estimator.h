@@ -1,5 +1,5 @@
 //
-//  temp_estimator.h
+//  pool_temp_estimator.h
 //  Pool Controller
 //
 //  Created by Gary Morris on 2025-09-28.
@@ -11,10 +11,10 @@
 #include "common_types.h"
 
 // This component estimates water temperature when direct readings are unavailable.
-class TemperatureEstimator : public PollingComponent {
+class PoolTempEstimator : public PollingComponent {
 public:
     // singleton access
-    static TemperatureEstimator* getInstance();
+    static PoolTempEstimator* getInstance();
 
     // --- PUBLIC GETTERS (Read-Only Access) ---
     // Anyone can call these methods to get the current sensor pointers.
@@ -36,7 +36,7 @@ private:
     Sensor *estimatedTempSensor_{nullptr};
 
     // Constructor
-    TemperatureEstimator();     // singleton constructor
+    PoolTempEstimator();     // singleton constructor
 
     // State tracking variables
     float panelTempC = NAN;

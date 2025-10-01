@@ -1,22 +1,22 @@
 //
-//  temp_estimator.cpp
+//  pool_temp_estimator.cpp
 //  Pool Controller
 //
 //  Created by Gary Morris on 2025-09-28.
 //
 
-#include "temp_estimator.h"
+#include "pool_temp_estimator.h"
 #include "esphome/core/log.h"
 
-TemperatureEstimator* TemperatureEstimator::getInstance() {
-    static TemperatureEstimator instance;
+PoolTempEstimator* PoolTempEstimator::getInstance() {
+    static PoolTempEstimator instance;
     return &instance;
 }
 
 // constructor
-TemperatureEstimator::TemperatureEstimator() : PollingComponent() {}
+PoolTempEstimator::PoolTempEstimator() : PollingComponent() {}
 
-void TemperatureEstimator::update() override {
+void PoolTempEstimator::update() override {
     if (std::isnan(lastWaterTempC) || std::isnan(panelTempC)) {
         // we haven't gotten a water or panel temp yet, can't estimate
         return;
@@ -50,7 +50,7 @@ void TemperatureEstimator::update() override {
     }
 }
 
-float TemperatureEstimator::estimatedTempC(float lastTempC, MilliSec msLastTemp, float panelTempC) const {
+float PoolTempEstimator::estimatedTempC(float lastTempC, MilliSec msLastTemp, float panelTempC) const {
     const float lastEstimateF = CtoF(lastTempC);
     const float panelTempF = CtoF(panelTempC);
 
@@ -86,11 +86,11 @@ float TemperatureEstimator::estimatedTempC(float lastTempC, MilliSec msLastTemp,
     return FtoC(newEstimateF);
 }
 
-void TemperatureEstimator::setPanelTempC(float newPanelTempC) {
+void PoolTempEstimator::setPanelTempC(float newPanelTempC) {
     panelTempC = newPanelTempC;
 }
 
-void TemperatureEstimator::setWaterTempC(float newWaterTempC) {
+void PoolTempEstimator::setWaterTempC(float newWaterTempC) {
     if (!std::isnan(newWaterTempC)) {
         // use the sensor's water temperature
         lastWaterTempC = newWaterTempC;
@@ -105,7 +105,7 @@ void TemperatureEstimator::setWaterTempC(float newWaterTempC) {
     }
 }
 
-float TemperatureEstimator::secElapsed(MilliSec now, MilliSec previous) const {
+float PoolTempEstimator::secElapsed(MilliSec now, MilliSec previous) const {
     const MilliSec msElapsed = now - previous;
     return msElapsed / 1000.0;
 }

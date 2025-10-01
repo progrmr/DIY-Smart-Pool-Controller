@@ -30,8 +30,8 @@
 		B271379B2E8AB4DC008A976A /* solar_controller.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = solar_controller.h; sourceTree = "<group>"; };
 		B271379C2E8AB4DC008A976A /* solar_controller.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = solar_controller.cpp; sourceTree = "<group>"; };
 		B271379E2E8AB4DC008A976A /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
-		B27137A02E8AB4DC008A976A /* temp_estimator.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = temp_estimator.h; sourceTree = "<group>"; };
-		B27137A12E8AB4DC008A976A /* temp_estimator.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = temp_estimator.cpp; sourceTree = "<group>"; };
+		B27137A02E8AB4DC008A976A /* pool_temp_estimator.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = pool_temp_estimator.h; sourceTree = "<group>"; };
+		B27137A12E8AB4DC008A976A /* pool_temp_estimator.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = pool_temp_estimator.cpp; sourceTree = "<group>"; };
 		B27137A52E8AB4DC008A976A /* valve_actuator.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = valve_actuator.h; sourceTree = "<group>"; };
 		B27137A62E8AB4DC008A976A /* valve_actuator.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = valve_actuator.cpp; sourceTree = "<group>"; };
 		B27137A82E8AB4DC008A976A /* common_types.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = common_types.h; sourceTree = "<group>"; };
@@ -66,14 +66,14 @@
 			path = solar_controller;
 			sourceTree = "<group>";
 		};
-		B27137A22E8AB4DC008A976A /* temperature_estimator */ = {
+		B27137A22E8AB4DC008A976A /* pool_temp_estimator */ = {
 			isa = PBXGroup;
 			children = (
 				B271379E2E8AB4DC008A976A /* __init__.py */,
-				B27137A02E8AB4DC008A976A /* temp_estimator.h */,
-				B27137A12E8AB4DC008A976A /* temp_estimator.cpp */,
+				B27137A02E8AB4DC008A976A /* pool_temp_estimator.h */,
+				B27137A12E8AB4DC008A976A /* pool_temp_estimator.cpp */,
 			);
-			path = temperature_estimator;
+			path = pool_temp_estimator;
 			sourceTree = "<group>";
 		};
 		B27137A72E8AB4DC008A976A /* valve_actuator */ = {
@@ -94,7 +94,7 @@
 				B27137A82E8AB4DC008A976A /* common_types.h */,
 				B27137982E8AB4DC008A976A /* pool_pump_rs485 */,
 				B271379D2E8AB4DC008A976A /* solar_controller */,
-				B27137A22E8AB4DC008A976A /* temperature_estimator */,
+				B27137A22E8AB4DC008A976A /* pool_temp_estimator */,
 				B27137A72E8AB4DC008A976A /* valve_actuator */,
 			);
 			path = components;
@@ -169,7 +169,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# =============================================================\n# ESPHome File Sync Script for Xcode\n# =============================================================\n\n# ‼️ IMPORTANT: Change this to the exact path of your mounted HA esphome folder\nHA_ESPHOME_DIR=\"/Volumes/config/esphome\"\n\n# ‼️ IMPORTANT: List the names of your component folders here\nCOMPONENTS=(\"solar_controller\" \"valve_actuator\" \"temperature_estimator\" \"pool_pump_rs485\")\n\n\n# --- Script starts here, no more editing needed ---\n\necho \"🚀 Starting ESPHome file sync...\"\n\n# Verify the destination directory exists\nif [ ! -d \"$HA_ESPHOME_DIR\" ]; then\n  echo \"❌ Error: Destination directory not found at $HA_ESPHOME_DIR\"\n  echo \"Please ensure your Home Assistant share is mounted correctly.\"\n  exit 1\nfi\n\n# Use the Xcode environment variable for the project's root directory\nSOURCE_DIR=\"$PROJECT_DIR\"\n\n# 1. Copy the main YAML file\necho \"➡️ Copying main YAML file...\"\ncp -v \"$SOURCE_DIR/components/pool_controller.yaml\" \"$HA_ESPHOME_DIR/\"\n\n# 2. Copy each component\nfor component in \"${COMPONENTS[@]}\"\ndo\n  echo \"➡️ Copying component: $component...\"\n  \n  # Create the destination component directory if it doesn't exist\n  mkdir -p \"$HA_ESPHOME_DIR/components/$component\"\n  \n  # Copy all files from the source component directory to the destination\n  # This will copy the .h, .cpp, and __init__.py files\n  cp -v \"$SOURCE_DIR/components/$component/\"* \"$HA_ESPHOME_DIR/components/$component/\"\ndone\n\necho \"✅ Sync complete! Files are ready on your Home Assistant machine.\"\n";
+			shellScript = "# =============================================================\n# ESPHome File Sync Script for Xcode\n# =============================================================\n\n# ‼️ IMPORTANT: Change this to the exact path of your mounted HA esphome folder\nHA_ESPHOME_DIR=\"/Volumes/config/esphome\"\n\n# ‼️ IMPORTANT: List the names of your component folders here\nCOMPONENTS=(\"solar_controller\" \"valve_actuator\" \"pool_temp_estimator\" \"pool_pump_rs485\")\n\n\n# --- Script starts here, no more editing needed ---\n\necho \"🚀 Starting ESPHome file sync...\"\n\n# Verify the destination directory exists\nif [ ! -d \"$HA_ESPHOME_DIR\" ]; then\n  echo \"❌ Error: Destination directory not found at $HA_ESPHOME_DIR\"\n  echo \"Please ensure your Home Assistant share is mounted correctly.\"\n  exit 1\nfi\n\n# Use the Xcode environment variable for the project's root directory\nSOURCE_DIR=\"$PROJECT_DIR\"\n\n# 1. Copy the main YAML file\necho \"➡️ Copying main YAML file...\"\ncp -v \"$SOURCE_DIR/components/pool_controller.yaml\" \"$HA_ESPHOME_DIR/\"\n\n# 2. Copy each component\nfor component in \"${COMPONENTS[@]}\"\ndo\n  echo \"➡️ Copying component: $component...\"\n  \n  # Create the destination component directory if it doesn't exist\n  mkdir -p \"$HA_ESPHOME_DIR/components/$component\"\n  \n  # Copy all files from the source component directory to the destination\n  # This will copy the .h, .cpp, and __init__.py files\n  cp -v \"$SOURCE_DIR/components/$component/\"* \"$HA_ESPHOME_DIR/components/$component/\"\ndone\n\necho \"✅ Sync complete! Files are ready on your Home Assistant machine.\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

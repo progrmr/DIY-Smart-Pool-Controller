@@ -15,7 +15,7 @@ File structure on the Home Assistant machine:
         │   ├── component.py
         │   ├── pool_pump_rs485.cpp
         │   └── pool_pump_rs485.h
-        ├── /temperature_estimator
+        ├── /pool_temp_estimator
         │   ├── __init__.py
         │   ├── component.py
         │   ├── temp_estimator.cpp

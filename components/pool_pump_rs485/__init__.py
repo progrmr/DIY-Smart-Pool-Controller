@@ -9,9 +9,7 @@ import esphome.config_validation as cv
 from esphome.components import sensor, uart
 from esphome.const import (
     CONF_ID,
-    CONF_FLOW,
     CONF_POWER,
-    CONF_RPM,
     DEVICE_CLASS_CURRENT,
     DEVICE_CLASS_DURATION,
     DEVICE_CLASS_POWER,
@@ -26,7 +24,6 @@ from esphome.const import (
     UNIT_AMPERE,
     UNIT_CELSIUS,
     UNIT_EMPTY,
-    UNIT_GALLONS_PER_MINUTE,
     UNIT_HOUR,
     UNIT_PERCENT,
     UNIT_REVOLUTIONS_PER_MINUTE,
@@ -43,10 +40,12 @@ PoolPumpRS485 = pool_pump_rs485_ns.class_(
 
 # Define constants for our custom YAML configuration keys to avoid magic strings
 CONF_WATTS = "watts"
+CONF_RPM = "speed"
+CONF_FLOW = "flow"
 CONF_RUN_TIME = "run_time"
 CONF_TARGET_RUN_HOURS = "target_run_hours"
 CONF_RUN_HOURS_DEFICIT = "run_hours_deficit"
-
+UNIT_GALLONS_PER_MINUTE = "GPM"
 
 # Define the YAML configuration schema for the component.
 # This tells ESPHome what keys are allowed in the YAML and how to validate them.
