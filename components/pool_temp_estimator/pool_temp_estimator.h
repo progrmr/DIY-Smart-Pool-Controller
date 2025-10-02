@@ -7,22 +7,23 @@
 
 #pragma once
 
-#include "esphome.h"
+#include "esphome/core/component.h"
+#include "esphome/components/sensor/sensor.h"
 #include "common_types.h"
 
 // This component estimates water temperature when direct readings are unavailable.
-class PoolTempEstimator : public PollingComponent {
+class PoolTempEstimator : public esphome::PollingComponent {
 public:
     // singleton access
     static PoolTempEstimator* getInstance();
 
     // --- PUBLIC GETTERS (Read-Only Access) ---
     // Anyone can call these methods to get the current sensor pointers.
-    Sensor* get_estimatedTempSensor() const { return estimatedTempSensor_; }
+    esphome::sensor::Sensor* get_estimatedTempSensor() const { return estimatedTempSensor_; }
 
     // --- PUBLIC SETTERS (Needed for ESPHome Setup) ---
     // These allow the ESPHome framework to link the sensors during startup.
-    void set_estimatedTempSensor(Sensor *s) { estimatedTempSensor_ = s; }
+    void set_estimatedTempSensor(esphome::sensor::Sensor *s) { estimatedTempSensor_ = s; }
 
     // Method declarations
     void update() override;
@@ -33,7 +34,7 @@ public:
 private:
     // --- SENSOR MEMBERS ---
     // Public pointers to the sensor objects that we will manage.
-    Sensor *estimatedTempSensor_{nullptr};
+    esphome::sensor::Sensor *estimatedTempSensor_{nullptr};
 
     // Constructor
     PoolTempEstimator();     // singleton constructor

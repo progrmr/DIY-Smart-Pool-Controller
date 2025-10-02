@@ -21,11 +21,13 @@
 
 #pragma once
 
-#include "esphome.h"
+#include "esphome/core/component.h"
+#include "esphome/components/sensor/sensor.h"
+#include "esphome/components/binary_sensor/binary_sensor.h"
 #include "common_types.h"
 
 // This component manages the state and position of the valve.
-class ValveActuator : public Component {
+class ValveActuator : public esphome::Component {
 public:
     // singleton access
     static ValveActuator* getInstance();
@@ -33,15 +35,15 @@ public:
     // --- PUBLIC GETTERS (Read-Only Access) ---
     // Anyone can call these methods to get the current sensor pointers.
     // The 'const' at the end means the method doesn't change the object's state.
-    Sensor* get_peakCurrentSensor() const { return peakCurrentSensor_; }
-    Sensor* get_actuationTimeSensor() const { return actuationTimeSensor_; }
-    TextSensor* get_valvePositionSensor() const { return valvePositionSensor_; }
+    esphome::sensor::Sensor* get_peakCurrentSensor() const { return peakCurrentSensor_; }
+    esphome::sensor::Sensor* get_actuationTimeSensor() const { return actuationTimeSensor_; }
+    esphome::text_sensor::TextSensor* get_valvePositionSensor() const { return valvePositionSensor_; }
 
     // --- PUBLIC SETTERS (Needed for ESPHome Setup) ---
     // These allow the ESPHome framework to link the sensors during startup.
-    void set_peakCurrentSensor(Sensor *s) { peakCurrentSensor_ = s; }
-    void set_actuationTimeSensor(Sensor *s) { actuationTimeSensor_ = s; }
-    void set_valvePositionSensor(TextSensor *s) { valvePositionSensor_ = s; }
+    void set_peakCurrentSensor(esphome::sensor::Sensor *s) { peakCurrentSensor_ = s; }
+    void set_actuationTimeSensor(esphome::sensor::Sensor *s) { actuationTimeSensor_ = s; }
+    void set_valvePositionSensor(esphome::text_sensor::TextSensor *s) { valvePositionSensor_ = s; }
 
     // Method declarations
     void setup() override;
@@ -53,9 +55,9 @@ public:
 private:
     // --- PRIVATE MEMBER VARIABLES ---
     // These can now only be directly written to by methods within the ValveActuator class.
-    Sensor *peakCurrentSensor_{nullptr};
-    Sensor *actuationTimeSensor_{nullptr};
-    TextSensor *valvePositionSensor_{nullptr};
+    esphome::sensor::Sensor *peakCurrentSensor_{nullptr};
+    esphome::sensor::Sensor *actuationTimeSensor_{nullptr};
+    esphome::text_sensor::TextSensor *valvePositionSensor_{nullptr};
 
     // Constructor
     ValveActuator();                    // singleton constructor

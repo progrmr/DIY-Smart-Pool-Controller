@@ -9,8 +9,6 @@
 #include "esphome/core/preferences.h"
 #include <string>
 
-extern time::SNTPComponent* local_sntp_time;
-
 static const char* const PREF_KEY = "solar_flow_state";
 static const char *const TAG = "solar_controller";
 
@@ -20,16 +18,16 @@ SolarController* SolarController::getInstance() {
 }
 
 // constructor
-SolarController::SolarController() : PollingComponent(SolarControllerPollIntervalSecs * 1000) {}
+SolarController::SolarController() : esphome::PollingComponent(SolarControllerPollIntervalSecs * 1000) {}
 
-void SolarController::setup() override {
+void SolarController::setup() {
     // init times to now
     const MilliSec now = millis();
     msDesiredFlowStateChanged = now;
     msCurrentFlowStateChanged = now;
 
     // Create a preferences object
-    auto prefs = global_preferences->make_preference<uint32_t>(PREF_KEY);
+    auto prefs = esphome::global_preferences->make_preference<uint32_t>(PREF_KEY);
     uint32_t saved_state;
 
     // Attempt to load the saved value from flash
@@ -55,18 +53,18 @@ void SolarController::setSolarFlowState(FlowStates newState) {
 
         if (newState == FlowStates::flowing || newState == FlowStates::idle) {
             // Create a preferences object and save the new state to flash
-            auto prefs = global_preferences->make_preference<uint32_t>(PREF_KEY);
+            auto prefs = esphome::global_preferences->make_preference<uint32_t>(PREF_KEY);
             // Cast the enum to an integer for saving
             prefs.save(static_cast<uint32_t>(flowOn));
         }
     }
 }
 
-void SolarController::update() override {
+void SolarController::update() {
     // Check to see if the pump is running.  For now, we will not try to start
     // the pump here.  We only will enable solar heat if the pump is already
     // running and all the other conditions are met.
-    auto pumpRPMSensor = id(pump_rpm_sensor)
+    auto pumpRPMSensor = esphome::id(pump_rpm_sensor)
     const float pumpRPM = pumpRPMSensor.has_state() ? pumpRPMSensor.state : NAN;
     if (std::isnan(pumpRPM)) {
         // pump RPM not available, leave solar state unchanged
@@ -80,12 +78,13 @@ void SolarController::update() override {
     }
 
     // spa mode affects which temperature settings we use
-    const bool spa_mode = id(spa_mode).state;
+    const bool spa_mode = esphome::id(spa_mode).state;
 
     // Time Check: we don't want to run the pump from 1600-2100 local,
     // because that's SDGE peak rates (exception: allow if in Spa mode)
     //
-    const auto timeNow = local_sntp_time->now();
+    auto sntp = esphome::id(local_sntp_time);
+    const auto timeNow = sntp->now();
     const int hour = timeNow.hour;
 
     if (!spa_mode) {
@@ -98,8 +97,8 @@ void SolarController::update() override {
     }
 
     // get temperatures we need to decide whether to enable or disable solar
-    auto waterTempC = id(estimated_water_temp);
-    auto panelTempC = id(panel_temperature);
+    auto waterTempC = esphome::id(estimated_water_temp);
+    auto panelTempC = esphome::id(panel_temperature);
 
     float waterTempF = waterTempC.has_state() ? CtoF(waterTempC.state) : NAN;
     float panelTempF = panelTempC.has_state() ? CtoF(panelTempC.state) : NAN;
@@ -107,12 +106,12 @@ void SolarController::update() override {
     float targetCoolTempF = NAN;
 
     if (spa_mode) {
-        auto spaTargetF = id(spa_target_temp);
+        auto spaTargetF = esphome::id(spa_target_temp);
         targetHeatTempF = spaTargetF.has_state() ? spaTargetF.state : NAN;
     } else {
-        auto poolHeatTargetF = id(pool_target_temp);
+        auto poolHeatTargetF = esphome::id(pool_target_temp);
         targetHeatTempF = poolHeatTargetF.has_state() ? poolHeatTargetF.state : NAN;
-        auto poolTargetCoolF = id(pool_cooling_target);
+        auto poolTargetCoolF = esphome::id(pool_cooling_target);
         targetCoolTempF = poolTargetCoolF.has_state() ? poolTargetCoolF.state : NAN;
     }
 
@@ -152,7 +151,7 @@ void SolarController::update() override {
 
     // evaluate whether we should enable solar heat or night cooling
     //
-    FlowStates newDesiredFlowState{unknown};
+    FlowStates newDesiredFlowState{FlowStates::unknown};
 
     if (spa_mode || (hour >= 8 && hour < 20)) {
         // evaluate whether we should enable solar heating

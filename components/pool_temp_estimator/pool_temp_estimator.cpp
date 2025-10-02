@@ -14,9 +14,9 @@ PoolTempEstimator* PoolTempEstimator::getInstance() {
 }
 
 // constructor
-PoolTempEstimator::PoolTempEstimator() : PollingComponent() {}
+PoolTempEstimator::PoolTempEstimator() : esphome::PollingComponent() {}
 
-void PoolTempEstimator::update() override {
+void PoolTempEstimator::update() {
     if (std::isnan(lastWaterTempC) || std::isnan(panelTempC)) {
         // we haven't gotten a water or panel temp yet, can't estimate
         return;

@@ -8,11 +8,14 @@
 
 #pragma once
 
-#include "esphome.h"
+#include "esphome/core/component.h"
+#include "esphome/components/sensor/sensor.h"
+#include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/components/uart/uart.h"
 #include "common_types.h"
 
 // --- Class Declaration ---
-class PoolPumpRS485 : public Component, public UARTDevice {
+class PoolPumpRS485 : public esphome::Component, public esphome::uart::UARTDevice {
 public:
     // singleton access
     static PoolPumpRS485* getInstance();
@@ -22,35 +25,35 @@ public:
 
     // --- SETTERS ---
     // Assigns the sensor object for pump RPM.
-    void set_rpm_sensor(Sensor* sensor) { this->rpmSensor_ = sensor; }
+    void set_rpm_sensor(esphome::sensor::Sensor* sensor) { this->rpmSensor_ = sensor; }
     // Assigns the sensor object for pump power consumption in watts.
-    void set_watts_sensor(Sensor* sensor) { this->wattsSensor_ = sensor; }
+    void set_watts_sensor(esphome::sensor::Sensor* sensor) { this->wattsSensor_ = sensor; }
     // Assigns the sensor object for pump flow rate.
-    void set_flow_sensor(Sensor* sensor) { this->flowSensor_ = sensor; }
+    void set_flow_sensor(esphome::sensor::Sensor* sensor) { this->flowSensor_ = sensor; }
     // Assigns the sensor object for pump power percentage.
-    void set_power_sensor(Sensor* sensor) { this->powerSensor_ = sensor; }
+    void set_power_sensor(esphome::sensor::Sensor* sensor) { this->powerSensor_ = sensor; }
     // Assigns the sensor object for today's total run time.
-    void set_run_time_sensor(Sensor* sensor) { this->runTimeSensor_ = sensor; }
+    void set_run_time_sensor(esphome::sensor::Sensor* sensor) { this->runTimeSensor_ = sensor; }
     // Assigns the sensor object for the daily target run hours.
-    void set_target_run_hours_sensor(Sensor* sensor) { this->targetRunHours_ = sensor; }
+    void set_target_run_hours_sensor(esphome::sensor::Sensor* sensor) { this->targetRunHours_ = sensor; }
     // Assigns the sensor object for the run hours deficit.
-    void set_run_hours_deficit_sensor(Sensor* sensor) { this->runHoursDeficit_ = sensor; }
+    void set_run_hours_deficit_sensor(esphome::sensor::Sensor* sensor) { this->runHoursDeficit_ = sensor; }
 
     // --- GETTERS ---
     // Returns the sensor object for pump RPM.
-    Sensor* get_rpm_sensor() const { return this->rpmSensor_; }
+    esphome::sensor::Sensor* get_rpm_sensor() const { return this->rpmSensor_; }
     // Returns the sensor object for pump power consumption in watts.
-    Sensor* get_watts_sensor() const { return this->wattsSensor_; }
+    esphome::sensor::Sensor* get_watts_sensor() const { return this->wattsSensor_; }
     // Returns the sensor object for pump flow rate.
-    Sensor* get_flow_sensor() const { return this->flowSensor_; }
+    esphome::sensor::Sensor* get_flow_sensor() const { return this->flowSensor_; }
     // Returns the sensor object for pump power percentage.
-    Sensor* get_power_sensor() const { return this->powerSensor_; }
+    esphome::sensor::Sensor* get_power_sensor() const { return this->powerSensor_; }
     // Returns the sensor object for today's total run time.
-    Sensor* get_run_time_sensor() const { return this->runTimeSensor_; }
+    esphome::sensor::Sensor* get_run_time_sensor() const { return this->runTimeSensor_; }
     // Returns the sensor object for the daily target run hours.
-    Sensor* get_target_run_hours_sensor() const { return this->targetRunHours_; }
+    esphome::sensor::Sensor* get_target_run_hours_sensor() const { return this->targetRunHours_; }
     // Returns the sensor object for the run hours deficit.
-    Sensor* get_run_hours_deficit_sensor() const { return this->runHoursDeficit_; }
+    esphome::sensor::Sensor* get_run_hours_deficit_sensor() const { return this->runHoursDeficit_; }
 
     void requestPumpSpeed(long speed);
     long pumpSpeedForSolar(bool solarHeatOn) const;
@@ -60,17 +63,17 @@ public:
 private:
     // --- SENSOR MEMBERS ---
     // Private pointers to the sensor objects that we will manage.
-    Sensor* rpmSensor_{nullptr};            // pool pump RPM
-    Sensor* wattsSensor_{nullptr};          // pool pump power consumption
-    Sensor* flowSensor_{nullptr};           // pool pump flow rate gal/min
-    Sensor* powerSensor_{nullptr};          // pool pump % of max power
+    esphome::sensor::Sensor* rpmSensor_{nullptr};            // pool pump RPM
+    esphome::sensor::Sensor* wattsSensor_{nullptr};          // pool pump power consumption
+    esphome::sensor::Sensor* flowSensor_{nullptr};           // pool pump flow rate gal/min
+    esphome::sensor::Sensor* powerSensor_{nullptr};          // pool pump % of max power
 
-    Sensor* runTimeSensor_{nullptr};        // today's total pump run time, in hours
-    Sensor* targetRunHours_{nullptr};       // hours pump should run per day
-    Sensor* runHoursDeficit_{nullptr};      // pump run hours deficit from past 2 days
+    esphome::sensor::Sensor* runTimeSensor_{nullptr};        // today's total pump run time, in hours
+    esphome::sensor::Sensor* targetRunHours_{nullptr};       // hours pump should run per day
+    esphome::sensor::Sensor* runHoursDeficit_{nullptr};      // pump run hours deficit from past 2 days
 
     // Constructor
-    PoolPumpRS485(UARTComponent *parent);       // singleton constructor
+    PoolPumpRS485(esphome::uart::UARTComponent *parent);       // singleton constructor
     static inline PoolPumpRS485* instance_{nullptr};  // pointer to instance
 
     // --- Private Members ---
@@ -209,7 +212,7 @@ private:
 
     // --- Private Method Declarations ---
     void setNextPollToHappenIn(MilliSec duration);
-    const char *const seqImage(MsgSequencingStates state);
+    const char *const seqImage(MsgSequencingStates state) const;
     MsgStates gotMessageByte(uint8_t byte, MsgStates msgState, Message *msg);
     Message makeMessage(MsgActions action, uint8_t length, const uint8_t *data);
     void sendMessage(const Message &msg);

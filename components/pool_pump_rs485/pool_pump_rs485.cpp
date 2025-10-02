@@ -12,18 +12,18 @@ PoolPumpRS485* PoolPumpRS485::getInstance() {
 }
 
 // constructor
-PoolPumpRS485::PoolPumpRS485(UARTComponent *parent) : UARTDevice(parent) {
+PoolPumpRS485::PoolPumpRS485(esphome::uart::UARTComponent *parent) : esphome::uart::UARTDevice(parent) {
     instance_ = this;
 }
 
 //
 // setup() -- one time setup
 //
-void PoolPumpRS485::setup() override {
+void PoolPumpRS485::setup() {
     // init a few things
     msLastPumpPoll = millis();              // init time of "previous" polling interval
 
-// TODO: get the global value for id(pump_actual_run_hours) and use that instead
+// TODO: get the global value for esphome::id(pump_actual_run_hours) and use that instead
 //    if (runTimeSensor_) {
 //        runTimeSensor_->publish_state( pumpHrs[0] );
 //    }
@@ -32,7 +32,7 @@ void PoolPumpRS485::setup() override {
 //
 // loop() -- main loop, called about every 16 milliseconds
 //
-void PoolPumpRS485::loop() override {
+void PoolPumpRS485::loop() {
     static MsgSequencingStates msgSequenceState = waitForNextPollInterval;
     static MsgStates msgState = expectStart;
     static MilliSec msReplyWaitStart = 0;
@@ -252,7 +252,7 @@ void PoolPumpRS485::requestPumpSpeed(long speed) {
 //                     solar on/off setting and pool/spa mode setting
 //
 long PoolPumpRS485::pumpSpeedForSolar(bool solarHeatOn) const {
-    const bool spaMode = id(spa_mode).state;
+    const bool spaMode = esphome::id(spa_mode).state;
     if (spaMode) {
         return solarHeatOn ? pumpSpaSolarOn : pumpSpaSolarOff;
     } else {
@@ -530,7 +530,7 @@ void PoolPumpRS485::handlePumpStatusReply(const Message& msg) {
         // adjust msElapsed by the timeCreditFactor, convert to seconds
         float secsCredit = (msElapsed / 1000.0) * timeCreditFactor;
 
-        auto& savedPumpHrs = id(pump_actual_run_hours);
+        auto& savedPumpHrs = esphome::id(pump_actual_run_hours);
         savedPumpHrs[0] += secsCredit / 3600.0;
 
         // publish sensor value of pump hours
@@ -561,8 +561,8 @@ void PoolPumpRS485::updatePumpStartTime(float pumpRPM) {
 
 void PoolPumpRS485::updatePumpHoursDeficit() {
     // Get references to the global arrays in the YAML config
-    auto& pumpActualRunHours = id(pump_actual_run_hours);
-    auto& pumpTargetRunHours = id(pump_target_run_hours);
+    auto& pumpActualRunHours = esphome::id(pump_actual_run_hours);
+    auto& pumpTargetRunHours = esphome::id(pump_target_run_hours);
 
     int nDaysHistory = 0;
     float actualPastDaysHours = 0;
@@ -598,12 +598,12 @@ void PoolPumpRS485::updatePumpHoursDeficit() {
 }
 
 void PoolPumpRS485::updatePumpTargetHours() {
-    const bool spaMode = id(spa_mode).state;
+    const bool spaMode = esphome::id(spa_mode).state;
     if (spaMode || !isPipeTempValid()) {
         return;     // this only applies to pool temperature
     }
 
-    auto waterTempC = id(water_temperature);
+    auto waterTempC = esphome::id(water_temperature);
     float waterTempF = waterTempC.has_state() ? CtoF(waterTempC.state) : NAN;
 
     if (std::isnan(waterTempF)) {
@@ -611,8 +611,8 @@ void PoolPumpRS485::updatePumpTargetHours() {
     }
 
     const float newTargetHrs = pumpHoursForWaterTempF(waterTempF);
-    auto& pumpTargetHrs = id(pump_target_run_hours);
-    auto& pumpActualHrs = id(pump_actual_run_hours);
+    auto& pumpTargetHrs = esphome::id(pump_target_run_hours);
+    auto& pumpActualHrs = esphome::id(pump_actual_run_hours);
 
     if (newTargetHrs != pumpTargetHrs[0]) {
         pumpTargetHrs[0] = newTargetHrs;
@@ -663,8 +663,8 @@ bool PoolPumpRS485::isPipeTempValid() const {
 
 // called from yaml in a lambda, as desired to debug hours data
 void PoolPumpRS485::printDebugInfo() const {
-    auto pumpTargetHrs = id(pump_target_run_hours);
-    auto pumpActualHrs = id(pump_actual_run_hours);
+    auto pumpTargetHrs = esphome::id(pump_target_run_hours);
+    auto pumpActualHrs = esphome::id(pump_actual_run_hours);
 
     for (int i=0; i<NDaysPumpHistory; i++) {
         float actual = pumpActualHrs[i];

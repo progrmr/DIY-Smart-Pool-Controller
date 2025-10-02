@@ -8,22 +8,23 @@
 
 #pragma once
 
-#include "esphome.h"
+#include "esphome/core/component.h"
+#include "esphome/components/binary_sensor/binary_sensor.h"
 #include "common_types.h"
 
 // This component controls the logic for solar heating and cooling.
-class SolarController : public PollingComponent {
+class SolarController : public esphome::PollingComponent {
 public:
     // singleton access
     static SolarController* getInstance();
 
     // --- PUBLIC GETTERS (Read-Only Access) ---
     // Anyone can call these methods to get the current sensor pointers.
-    BinarySensor* get_solarFlowSensor() const { return solarFlowSensor_; }
+    esphome::binary_sensor::BinarySensor* get_solarFlowSensor() const { return solarFlowSensor_; }
 
     // --- PUBLIC SETTERS (Needed for ESPHome Setup) ---
     // These allow the ESPHome framework to link the sensors during startup.
-    void set_solarFlowSensor(BinarySensor *s) { solarFlowSensor_ = s; }
+    void set_solarFlowSensor(esphome::binary_sensor::BinarySensor *s) { solarFlowSensor_ = s; }
 
     // Method declarations
     void setup() override;
@@ -33,7 +34,7 @@ private:
     // --- SENSOR MEMBERS ---
     // Public pointers to the sensor objects that we will manage.
     // solarFlowSensor indicates if water should be circulating up to the solar panels
-    BinarySensor* solarFlowSensor_{nullptr};
+    esphome::binary_sensor::BinarySensor* solarFlowSensor_{nullptr};
 
     // Constructor
     SolarController();      // singleton constructor
@@ -44,12 +45,12 @@ private:
     // track desired solar heat state
     //
     MilliSec msDesiredFlowStateChanged{0};       // millis() time at desired flow change
-    FlowStates desiredFlowState{unknown};
+    FlowStates desiredFlowState{FlowStates::unknown};
 
     // track solar heat state
     //
     MilliSec msCurrentFlowStateChanged{0};       // millis() time of last state change
-    FlowStates currentFlowState{unknown};
+    FlowStates currentFlowState{FlowStates::unknown};
 
     // track current switch and sensor readings
     //

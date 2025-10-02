@@ -3,66 +3,38 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor, text_sensor
-from esphome.const import (
-    CONF_ID,
-    STATE_CLASS_MEASUREMENT,
-    UNIT_AMPERE,
-    UNIT_SECOND,
-    ICON_CURRENT_AC,
-    ICON_TIMER,
-)
 
-# It's better practice to declare the C++ class from the global namespace
-# if that's where it truly lives in your .h/.cpp files.
-ValveActuator = cg.global_ns.class_("ValveActuator", cg.Component)
-
+# Define these as custom keys instead of importing them
 CONF_PEAK_CURRENT = "peak_current"
 CONF_ACTUATION_TIME = "actuation_time"
 CONF_VALVE_POSITION = "valve_position"
 
-CONFIG_SCHEMA = cv.All(
-    cv.Schema(
-        {
-            cv.Optional(CONF_PEAK_CURRENT): sensor.sensor_schema(
-                unit_of_measurement=UNIT_AMPERE,
-                icon=ICON_CURRENT_AC,
-                accuracy_decimals=2,
-                state_class=STATE_CLASS_MEASUREMENT,
-            ),
-            cv.Optional(CONF_ACTUATION_TIME): sensor.sensor_schema(
-                unit_of_measurement=UNIT_SECOND,
-                icon=ICON_TIMER,
-                accuracy_decimals=1,
-                state_class=STATE_CLASS_MEASUREMENT,
-            ),
-            cv.Optional(CONF_VALVE_POSITION): text_sensor.text_sensor_schema(
-                icon="mdi:valve",
-            ),
-        }
-    ),
-    # Correctly require each component in a separate call
-    cv.requires_component("sensor"),
-    cv.requires_component("text_sensor"),
-)
+ValveActuator = cg.global_ns.class_("ValveActuator", cg.Component)
+
+# Use a more specific key to avoid conflicts with other components
+CONF_VALVE_POSITION = "valve_position"
+
+# The schema now requires the IDs of sensors that have already been defined elsewhere.
+# This completely decouples the validation logic.
+CONFIG_SCHEMA = cv.Schema({
+    cv.Required(CONF_PEAK_CURRENT): cv.use_id(sensor.Sensor),
+    cv.Required(CONF_ACTUATION_TIME): cv.use_id(sensor.Sensor),
+    cv.Required(CONF_VALVE_POSITION): cv.use_id(text_sensor.TextSensor),
+})
 
 async def to_code(config):
     """Generate the C++ code for this component."""
-    # Use the modern, high-level helper for singletons.
-    # This automatically handles includes and variable declaration.
     var = cg.add_global(ValveActuator.getInstance())
     if var is None:
-        return  # <-- This is the correct check
+        return
 
     await cg.register_component(var, config)
 
-    if CONF_PEAK_CURRENT in config:
-        sens = await sensor.new_sensor(config[CONF_PEAK_CURRENT])
-        cg.add(var.set_peakCurrentSensor(sens))
+    peak_current_sens = await cg.get_variable(config[CONF_PEAK_CURRENT])
+    cg.add(var.set_peakCurrentSensor(peak_current_sens))
 
-    if CONF_ACTUATION_TIME in config:
-        sens = await sensor.new_sensor(config[CONF_ACTUATION_TIME])
-        cg.add(var.set_actuationTimeSensor(sens))
+    actuation_time_sens = await cg.get_variable(config[CONF_ACTUATION_TIME])
+    cg.add(var.set_actuationTimeSensor(actuation_time_sens))
 
-    if CONF_VALVE_POSITION in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_VALVE_POSITION])
-        cg.add(var.set_valvePositionSensor(sens))
+    valve_pos_sens = await cg.get_variable(config[CONF_VALVE_POSITION])
+    cg.add(var.set_valvePositionSensor(valve_pos_sens))

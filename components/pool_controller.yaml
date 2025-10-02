@@ -290,32 +290,21 @@ number:
 # https://esphome.io/components/text_sensor/custom.html
 #----------------------------------------------------------------------
 valve_actuator:
-  # Defines the text sensor for valve position
+  peak_current: peak_current
+  actuation_time: actuation_time
+  valve_position: valve_position
+
+pool_temp_estimator:
+  estimated_temperature_sensor: estimated_water_temp
+
+text_sensor:
+  # VALVE POSITION - Defines the text sensor for valve position
   # Valve Actuator can be:  unknown, opening, closing, opened, closed
   # It is initially unknown, but changes based on the relay states etc.
-  valve_position:
+  - platform: template
     name: "Valve Position"
+    id: valve_position
 
-  # PEAK CURRENT - keeps track of the valve actuator's peak currant usage
-  # measured in amps. This is for diagnostic purposes.  High peak current
-  # could mean a water leak inside the valve from a bad seal.  It should
-  # not be operated if current is abnormally high.  The original valve
-  # melted some traces on its circuit board due to a water leak.
-  # https://esphome.io/components/sensor/custom.html
-  peak_current:
-    name: "Peak Current"
-
-  # ACTUATION TIME
-  #
-  # Measures how long it takes for the valve actuator to
-  # complete its actuation from open to closed or closed to open.
-  # This is for diagnostic purposes.  Taking less than ~25 seconds means
-  # the valve wasn't fully open/closed, taking longer could mean there
-  # is a problem with turning the valve.  See also actuator current and
-  # peak current to diagnose problems with valve operation.
-  # https://esphome.io/components/sensor/custom.html
-  actuation_time:
-    name: "Actuation Time"
 
 #----------------------------------------------------------------------
 # SOLAR CONTROLLER
@@ -332,8 +321,10 @@ valve_actuator:
 # https://esphome.io/components/binary_sensor/custom.html
 #----------------------------------------------------------------------
 solar_controller:
-  solar_flow:
-    # This defines the binary sensor
+  solar_flow_sensor: use_solar_heat
+
+binary_sensor:
+  - platform: template
     id: use_solar_heat
     name: "Use Solar Heat"
 
@@ -362,15 +353,36 @@ solar_controller:
           const long newPumpSpeed = PoolPumpRS485::getInstance()->pumpSpeedForSolar(false);
           id(pump_speed_request)->publish_state(newPumpSpeed);
 
-pool_temp_estimator:
-  id: pool_temp_estimator_hub  # An ID for the main component
-  update_interval: 1min
-  estimated_temperature:
-    # This is where the sensor is defined
-    id: estimated_water_temp
-    name: "Estimated Water Temp"
-
 sensor:
+  - platform: template
+    name: "Estimated Water Temp"
+    id: estimated_water_temp
+    icon: "mdi:thermometer-water"
+    accuracy_decimals: 1
+    device_class: "temperature"
+    state_class: "measurement"
+
+  # PEAK CURRENT - keeps track of the valve actuator's peak currant usage
+  # measured in amps. This is for diagnostic purposes.  High peak current
+  # could mean a water leak inside the valve from a bad seal.  It should
+  # not be operated if current is abnormally high.  The original valve
+  # melted some traces on its circuit board due to a water leak.
+  # https://esphome.io/components/sensor/custom.html
+  - platform: template
+    name: "Peak Current"
+    id: peak_current
+
+  # ACTUATION TIME - Measures how long it takes for the valve actuator to
+  # complete its actuation from open to closed or closed to open.
+  # This is for diagnostic purposes.  Taking less than ~25 seconds means
+  # the valve wasn't fully open/closed, taking longer could mean there
+  # is a problem with turning the valve.  See also actuator current and
+  # peak current to diagnose problems with valve operation.
+  # https://esphome.io/components/sensor/custom.html
+  - platform: template
+    name: "Actuation Time"
+    id: actuation_time
+
 #----------------------------------------------------------------------
 # SPA TIME REMAINING -- count down display of the time remaining
 # on the spa timer.  When this gets to 0, the timer is reset to 0,
@@ -580,7 +592,7 @@ sensor:
           send_every: 5
     on_value:
       then:
-        - lambda: 'PoolTempEstimater::getInstance()->setPanelTempC(x);'
+        - lambda: 'PoolTempEstimator::getInstance()->setPanelTempC(x);'
 
 #----------------------------------------------------------------------
 # RESISTANCE SENSORS for thermistor's voltage dividors

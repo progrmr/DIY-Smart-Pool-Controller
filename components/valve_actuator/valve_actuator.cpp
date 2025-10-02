@@ -12,7 +12,7 @@ ValveActuator* ValveActuator::getInstance() {
 // constructor
 ValveActuator::ValveActuator() {}
 
-void ValveActuator::setup() override {
+void ValveActuator::setup() {
     // Create a preferences object
     auto prefs = global_preferences->make_preference<uint32_t>(PREF_KEY);
 
