@@ -8,7 +8,8 @@ substitutions:
 esphome:
   name: ${devicename}
   friendly_name: ${friendly_devicename}
-  # The 'includes' key is removed and replaced by the 'external_components' block below.
+  includes:
+    - components/common_types.h
   on_boot:
     priority: -10
     then:
@@ -293,7 +294,6 @@ valve_actuator:
   # Valve Actuator can be:  unknown, opening, closing, opened, closed
   # It is initially unknown, but changes based on the relay states etc.
   valve_position:
-    id: valve_position
     name: "Valve Position"
 
   # PEAK CURRENT - keeps track of the valve actuator's peak currant usage
@@ -303,7 +303,6 @@ valve_actuator:
   # melted some traces on its circuit board due to a water leak.
   # https://esphome.io/components/sensor/custom.html
   peak_current:
-    id: peak_current
     name: "Peak Current"
 
   # ACTUATION TIME
@@ -316,7 +315,6 @@ valve_actuator:
   # peak current to diagnose problems with valve operation.
   # https://esphome.io/components/sensor/custom.html
   actuation_time:
-    id: actuation_time
     name: "Actuation Time"
 
 #----------------------------------------------------------------------
