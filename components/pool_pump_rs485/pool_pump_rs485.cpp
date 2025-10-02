@@ -252,8 +252,7 @@ void PoolPumpRS485::requestPumpSpeed(long speed) {
 //                     solar on/off setting and pool/spa mode setting
 //
 long PoolPumpRS485::pumpSpeedForSolar(bool solarHeatOn) const {
-    const bool spaMode = esphome::id(spa_mode).state;
-    if (spaMode) {
+    if (spa_mode_) {
         return solarHeatOn ? pumpSpaSolarOn : pumpSpaSolarOff;
     } else {
         return solarHeatOn ? pumpPoolSolarOn : pumpPoolSolarOff;
@@ -598,8 +597,7 @@ void PoolPumpRS485::updatePumpHoursDeficit() {
 }
 
 void PoolPumpRS485::updatePumpTargetHours() {
-    const bool spaMode = esphome::id(spa_mode).state;
-    if (spaMode || !isPipeTempValid()) {
+    if (spa_mode_ || !isPipeTempValid()) {
         return;     // this only applies to pool temperature
     }
 

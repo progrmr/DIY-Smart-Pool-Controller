@@ -30,6 +30,9 @@ public:
     void setup() override;
     void update() override;
 
+    // this component needs to know if the spa is in use to manage the solar
+    void set_spa_mode(bool spa_mode) { spa_mode_ = spa_mode; }
+
 private:
     // --- SENSOR MEMBERS ---
     // Public pointers to the sensor objects that we will manage.
@@ -56,6 +59,9 @@ private:
     //
     MilliSec msMissingDataStarted{0};            // millis() time of first missing data event
 
+    // track current spa_mode switch
+    bool spa_mode_{false};
+
     // constants
     //
     static constexpr float SPA_TARGET_TOLERANCE{0.5};  // in ºF, how much to over/undershoot target
@@ -75,7 +81,7 @@ private:
 
     // private method declarations
     void setSolarFlowState(FlowStates newState);
-    FlowStates evaluateCooling(bool spaMode, float targetTempF, float waterTempF, float panelTempF) const;
-    FlowStates evaluateHeat(bool spaMode, float targetTempF, float waterTempF, float panelTempF) const;
+    FlowStates evaluateCooling(float targetTempF, float waterTempF, float panelTempF) const;
+    FlowStates evaluateHeat(float targetTempF, float waterTempF, float panelTempF) const;
 };
 

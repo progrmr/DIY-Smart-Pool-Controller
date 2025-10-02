@@ -60,6 +60,9 @@ public:
     bool isPipeTempValid() const;
     void printDebugInfo() const;
 
+    // this component needs to know if the spa is in use to manage the solar
+    void set_spa_mode(bool spa_mode) { spa_mode_ = spa_mode; }
+
 private:
     // --- SENSOR MEMBERS ---
     // Private pointers to the sensor objects that we will manage.
@@ -88,6 +91,9 @@ private:
     uint16_t lastPumpWatts = 9999;
     uint8_t lastPumpFlow = 255;
     uint8_t lastPumpPower = 255;
+
+    // track current spa_mode switch
+    bool spa_mode_{false};
 
     // RS-485 Message Sequencing States
     enum MsgSequencingStates {

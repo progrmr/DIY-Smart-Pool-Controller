@@ -760,6 +760,12 @@ switch:
     # TODO: restore_mode should be RESTORE_AND_CALL
     restore_mode: RESTORE_DEFAULT_OFF
     optimistic: True
+    on_change:
+      then:
+        - lambda: |-
+            const bool spaMode = id(spa_mode).state;
+            SolarController::getInstance()->set_spa_mode(spaMode);
+            PoolPumpRS485::getInstance()->set_spa_mode(spaMode);
 
 #----------------------------------------------------------------------
 # TIME - used to reset min/max temp at midnight
