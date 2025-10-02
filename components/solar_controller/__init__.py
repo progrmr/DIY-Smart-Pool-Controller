@@ -5,7 +5,7 @@ import esphome.config_validation as cv
 from esphome.components import binary_sensor
 from esphome.const import CONF_ID
 
-DEPENDENCIES = ['time']
+DEPENDENCIES = ['time', 'binary_sensor']
 
 # The C++ class is in the global namespace
 SolarController = cg.global_ns.class_('SolarController', cg.PollingComponent)

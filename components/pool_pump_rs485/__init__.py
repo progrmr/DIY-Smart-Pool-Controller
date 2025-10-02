@@ -30,6 +30,8 @@ from esphome.const import (
     UNIT_WATT,
 )
 
+DEPENDENCIES = ["uart", "sensor"]
+
 # Define a C++ namespace for this component
 pool_pump_rs485_ns = cg.esphome_ns.namespace("pool_pump_rs485")
 

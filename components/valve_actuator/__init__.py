@@ -20,25 +20,30 @@ CONF_PEAK_CURRENT = "peak_current"
 CONF_ACTUATION_TIME = "actuation_time"
 CONF_VALVE_POSITION = "valve_position"
 
-CONFIG_SCHEMA = cv.Schema({
-    # We can remove cv.GenerateID() as add_global will manage the component's ID.
-    cv.Optional(CONF_PEAK_CURRENT): sensor.sensor_schema(
-        unit_of_measurement=UNIT_AMPERE,
-        icon=ICON_CURRENT_AC,
-        accuracy_decimals=2,
-        state_class=STATE_CLASS_MEASUREMENT,
+CONFIG_SCHEMA = cv.All(
+    cv.Schema(
+        {
+            cv.Optional(CONF_PEAK_CURRENT): sensor.sensor_schema(
+                unit_of_measurement=UNIT_AMPERE,
+                icon=ICON_CURRENT_AC,
+                accuracy_decimals=2,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_ACTUATION_TIME): sensor.sensor_schema(
+                unit_of_measurement=UNIT_SECOND,
+                icon=ICON_TIMER,
+                accuracy_decimals=1,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_VALVE_POSITION): text_sensor.text_sensor_schema(
+                icon="mdi:valve",
+            ),
+        }
     ),
-    cv.Optional(CONF_ACTUATION_TIME): sensor.sensor_schema(
-        unit_of_measurement=UNIT_SECOND,
-        icon=ICON_TIMER,
-        accuracy_decimals=1,
-        state_class=STATE_CLASS_MEASUREMENT,
-    ),
-    cv.Optional(CONF_VALVE_POSITION): text_sensor.text_sensor_schema(
-        icon="mdi:valve",
-    ),
-}).extend(cv.COMPONENT_SCHEMA)
-
+    # Correctly require each component in a separate call
+    cv.requires_component("sensor"),
+    cv.requires_component("text_sensor"),
+)
 
 async def to_code(config):
     """Generate the C++ code for this component."""
