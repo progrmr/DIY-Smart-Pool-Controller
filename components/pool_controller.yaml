@@ -85,16 +85,6 @@ uart:
   baud_rate: 9600
 
 globals:
-  - id: pump_actual_run_hours
-    type: float[3]
-    initial_value: '{0,0,0}'
-    restore_value: yes
-
-  - id: pump_target_run_hours
-    type: float[3]
-    initial_value: '{0,0,0}'
-    restore_value: yes
-
   # SOTD (Second of the Day, range: 0...86399), midnight == 0, 23:59:59 == 86399
   - id: spa_timer_end_sotd
     type: long
@@ -760,10 +750,16 @@ switch:
     # TODO: restore_mode should be RESTORE_AND_CALL
     restore_mode: RESTORE_DEFAULT_OFF
     optimistic: True
-    on_change:
+    on_turn_on:
       then:
         - lambda: |-
-            const bool spaMode = id(spa_mode).state;
+            const bool spaMode = true;
+            SolarController::getInstance()->set_spa_mode(spaMode);
+            PoolPumpRS485::getInstance()->set_spa_mode(spaMode);
+    on_turn_off:
+      then:
+        - lambda: |-
+            const bool spaMode = false;
             SolarController::getInstance()->set_spa_mode(spaMode);
             PoolPumpRS485::getInstance()->set_spa_mode(spaMode);
 
@@ -784,19 +780,6 @@ time:
               const float waterTemp = id(water_temperature)->state;
               id(minimum_water_temperature)->publish_state(waterTemp);
               id(maximum_water_temperature)->publish_state(waterTemp);
-
-              // at midnight, reset pump run time to 0
-              auto& pumpTargetHrs = id(pump_target_run_hours);
-              auto& pumpActualHrs = id(pump_actual_run_hours);
-              int day = 2;       // start with last index
-              while (day >= 1) {
-                pumpActualHrs[day] = pumpActualHrs[day-1];
-                pumpTargetHrs[day] = pumpTargetHrs[day-1];
-                day--;
-              }
-              // zero out hours, a new day is starting
-              pumpActualHrs[0] = 0.0;
-              pumpTargetHrs[0] = 0.0;
 
 #----------------------------------------------------------------------
 # POOL PUMP RS-485 COMM
@@ -842,12 +825,3 @@ pool_pump_rs485:
   run_time:
     name: "Pump Run Hours"
     id: pump_run_hours
-
-  target_run_hours:
-    name: "Pump Target Hours"
-    id: pump_target_hours
-
-  run_hours_deficit:
-    name: "Pump Hours Deficit"
-    id: pump_hours_deficit
-

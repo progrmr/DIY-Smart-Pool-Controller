@@ -45,8 +45,6 @@ CONF_WATTS = "watts"
 CONF_RPM = "speed"
 CONF_FLOW = "flow"
 CONF_RUN_TIME = "run_time"
-CONF_TARGET_RUN_HOURS = "target_run_hours"
-CONF_RUN_HOURS_DEFICIT = "run_hours_deficit"
 UNIT_GALLONS_PER_MINUTE = "GPM"
 
 # Define the YAML configuration schema for the component.
@@ -92,18 +90,6 @@ CONFIG_SCHEMA = (
                 device_class=DEVICE_CLASS_DURATION,
                 state_class=STATE_CLASS_TOTAL_INCREASING,
             ),
-            cv.Optional(CONF_TARGET_RUN_HOURS): sensor.sensor_schema(
-                unit_of_measurement=UNIT_HOUR,
-                icon="mdi:bullseye-arrow",
-                accuracy_decimals=2,
-                device_class=DEVICE_CLASS_DURATION,
-            ),
-            cv.Optional(CONF_RUN_HOURS_DEFICIT): sensor.sensor_schema(
-                unit_of_measurement=UNIT_HOUR,
-                icon="mdi:timer-sand-paused",
-                accuracy_decimals=2,
-                device_class=DEVICE_CLASS_DURATION,
-            ),
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -145,11 +131,3 @@ async def to_code(config):
     if run_time_config := config.get(CONF_RUN_TIME):
         sens = await sensor.new_sensor(run_time_config)
         cg.add(var.set_run_time_sensor(sens))
-
-    if target_run_hours_config := config.get(CONF_TARGET_RUN_HOURS):
-        sens = await sensor.new_sensor(target_run_hours_config)
-        cg.add(var.set_target_run_hours_sensor(sens))
-        
-    if run_hours_deficit_config := config.get(CONF_RUN_HOURS_DEFICIT):
-        sens = await sensor.new_sensor(run_hours_deficit_config)
-        cg.add(var.set_run_hours_deficit_sensor(sens))

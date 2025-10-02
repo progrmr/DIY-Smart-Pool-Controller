@@ -34,10 +34,6 @@ public:
     void set_power_sensor(esphome::sensor::Sensor* sensor) { this->powerSensor_ = sensor; }
     // Assigns the sensor object for today's total run time.
     void set_run_time_sensor(esphome::sensor::Sensor* sensor) { this->runTimeSensor_ = sensor; }
-    // Assigns the sensor object for the daily target run hours.
-    void set_target_run_hours_sensor(esphome::sensor::Sensor* sensor) { this->targetRunHours_ = sensor; }
-    // Assigns the sensor object for the run hours deficit.
-    void set_run_hours_deficit_sensor(esphome::sensor::Sensor* sensor) { this->runHoursDeficit_ = sensor; }
 
     // --- GETTERS ---
     // Returns the sensor object for pump RPM.
@@ -50,10 +46,6 @@ public:
     esphome::sensor::Sensor* get_power_sensor() const { return this->powerSensor_; }
     // Returns the sensor object for today's total run time.
     esphome::sensor::Sensor* get_run_time_sensor() const { return this->runTimeSensor_; }
-    // Returns the sensor object for the daily target run hours.
-    esphome::sensor::Sensor* get_target_run_hours_sensor() const { return this->targetRunHours_; }
-    // Returns the sensor object for the run hours deficit.
-    esphome::sensor::Sensor* get_run_hours_deficit_sensor() const { return this->runHoursDeficit_; }
 
     void requestPumpSpeed(long speed);
     long pumpSpeedForSolar(bool solarHeatOn) const;
@@ -70,30 +62,24 @@ private:
     esphome::sensor::Sensor* wattsSensor_{nullptr};          // pool pump power consumption
     esphome::sensor::Sensor* flowSensor_{nullptr};           // pool pump flow rate gal/min
     esphome::sensor::Sensor* powerSensor_{nullptr};          // pool pump % of max power
-
     esphome::sensor::Sensor* runTimeSensor_{nullptr};        // today's total pump run time, in hours
-    esphome::sensor::Sensor* targetRunHours_{nullptr};       // hours pump should run per day
-    esphome::sensor::Sensor* runHoursDeficit_{nullptr};      // pump run hours deficit from past 2 days
 
     // Constructor
     PoolPumpRS485(esphome::uart::UARTComponent *parent);       // singleton constructor
     static inline PoolPumpRS485* instance_{nullptr};  // pointer to instance
 
     // --- Private Members ---
+    bool spa_mode_{false};
     bool shouldRequestExtPgmOn = false;
     uint8_t shouldRequestExtPgmOff = 0;
     long pumpSpeedRequested = 0;
     MilliSec msLastPumpPoll = 0;
     MilliSec msLastPumpStatusReply = 0;
     MilliSec msPumpStartTime = 0;
-    float pumpRunHoursDeficit = NAN;
     uint16_t lastPumpRPM = 9999;
     uint16_t lastPumpWatts = 9999;
     uint8_t lastPumpFlow = 255;
     uint8_t lastPumpPower = 255;
-
-    // track current spa_mode switch
-    bool spa_mode_{false};
 
     // RS-485 Message Sequencing States
     enum MsgSequencingStates {
@@ -213,7 +199,6 @@ private:
     static constexpr MilliSec ReplyTimeoutMS = 1000;
     static constexpr int MinPumpSpeed = 0;
     static constexpr int MaxPumpSpeed = 3000;
-    static constexpr int NDaysPumpHistory = 3;
     static constexpr int PIPE_TEMP_VALID_INTERVAL_S = 4 * 60;   // 4 minutes
 
     // --- Private Method Declarations ---
@@ -227,8 +212,5 @@ private:
     bool isValidMessage(const Message &msg) const;
     void handlePumpStatusReply(const Message &msg);
     void updatePumpStartTime(float pumpRPM);
-    void updatePumpHoursDeficit();
-    void updatePumpTargetHours();
-    float pumpHoursForWaterTempF(float waterTempF) const;
 
 };

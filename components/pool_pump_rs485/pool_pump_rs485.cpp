@@ -22,11 +22,6 @@ PoolPumpRS485::PoolPumpRS485(esphome::uart::UARTComponent *parent) : esphome::ua
 void PoolPumpRS485::setup() {
     // init a few things
     msLastPumpPoll = millis();              // init time of "previous" polling interval
-
-// TODO: get the global value for esphome::id(pump_actual_run_hours) and use that instead
-//    if (runTimeSensor_) {
-//        runTimeSensor_->publish_state( pumpHrs[0] );
-//    }
 }
 
 //
@@ -506,35 +501,9 @@ void PoolPumpRS485::handlePumpStatusReply(const Message& msg) {
     updatePumpStartTime(curPumpRPM);
 
     //---------------------------
-    // update pump run time target hours (if temp valid)
-    updatePumpTargetHours();
-
-    //---------------------------
-    // update pump run hours deficit
-    updatePumpHoursDeficit();
-
-    //---------------------------
     // compute how long the pump has been running for this polling loop
     //---------------------------
     MilliSec msNow = millis();
-
-    // if we have the time of the previous pump status message and
-    // the pump is running, then count the elapsed run time
-    if (msLastPumpStatusReply > 0 && curPumpRPM > 1000) {
-        MilliSec msElapsed = msNow - msLastPumpStatusReply;
-
-        // get 100% run time credit at 2400, more when faster, less when slower
-        float timeCreditFactor = curPumpRPM / 2400.0;
-
-        // adjust msElapsed by the timeCreditFactor, convert to seconds
-        float secsCredit = (msElapsed / 1000.0) * timeCreditFactor;
-
-        auto& savedPumpHrs = esphome::id(pump_actual_run_hours);
-        savedPumpHrs[0] += secsCredit / 3600.0;
-
-        // publish sensor value of pump hours
-        runTimeSensor_->publish_state( savedPumpHrs[0] );
-    }
 
     msLastPumpStatusReply = msNow;  // start next period
 }
@@ -558,97 +527,6 @@ void PoolPumpRS485::updatePumpStartTime(float pumpRPM) {
     }
 }
 
-void PoolPumpRS485::updatePumpHoursDeficit() {
-    // Get references to the global arrays in the YAML config
-    auto& pumpActualRunHours = esphome::id(pump_actual_run_hours);
-    auto& pumpTargetRunHours = esphome::id(pump_target_run_hours);
-
-    int nDaysHistory = 0;
-    float actualPastDaysHours = 0;
-    float targetPastDaysHours = 0;
-
-    for (int i=0; i<NDaysPumpHistory; i++) {
-        if (!std::isnan(pumpActualRunHours[i]) &&
-            !std::isnan(pumpTargetRunHours[i]))
-        {
-            nDaysHistory++;
-            actualPastDaysHours += pumpActualRunHours[i];
-            targetPastDaysHours += pumpTargetRunHours[i];
-        }
-    }
-
-    if (nDaysHistory == 0) {
-        runHoursDeficit_->publish_state(NAN);
-        return;     // no history hours
-    }
-
-    float newDeficitHours = targetPastDaysHours - actualPastDaysHours;
-
-    ESP_LOGD("custom","----- PUMP HOURS Deficit: %0.1f (%0.1f actual, %0.1f target) [%d days]",
-             newDeficitHours, actualPastDaysHours, targetPastDaysHours, nDaysHistory);
-
-    // should we publish an update?
-    float difference = fabs(newDeficitHours - this->pumpRunHoursDeficit);
-
-    if (std::isnan(pumpRunHoursDeficit) || difference >= 0.1) {
-        this->pumpRunHoursDeficit = newDeficitHours;
-        runHoursDeficit->publish_state(newDeficitHours);
-    }
-}
-
-void PoolPumpRS485::updatePumpTargetHours() {
-    if (spa_mode_ || !isPipeTempValid()) {
-        return;     // this only applies to pool temperature
-    }
-
-    auto waterTempC = esphome::id(water_temperature);
-    float waterTempF = waterTempC.has_state() ? CtoF(waterTempC.state) : NAN;
-
-    if (std::isnan(waterTempF)) {
-        return;     // can't do this without water temp
-    }
-
-    const float newTargetHrs = pumpHoursForWaterTempF(waterTempF);
-    auto& pumpTargetHrs = esphome::id(pump_target_run_hours);
-    auto& pumpActualHrs = esphome::id(pump_actual_run_hours);
-
-    if (newTargetHrs != pumpTargetHrs[0]) {
-        pumpTargetHrs[0] = newTargetHrs;
-        targetRunHours->publish_state(newTargetHrs);
-    }
-
-    // if pump target hours history is all 0, then it has never
-    // been initialized, do that now
-    if (pumpTargetHrs[NDaysPumpHistory-1] < 0.1) {
-        for (int i=1; i<NDaysPumpHistory; i++) {
-            if (pumpTargetHrs[i] < 0.1) {
-                pumpTargetHrs[i] = newTargetHrs;
-            }
-            if (pumpActualHrs[i] < 0.1) {
-                pumpActualHrs[i] = newTargetHrs;
-            }
-        }
-    }
-}
-
-float PoolPumpRS485::pumpHoursForWaterTempF(float waterTempF) const {
-    if (waterTempF >= 95) {
-        return 12;      // 95+
-    } else if (waterTempF >= 90) {
-        return 11;      // 90-95
-    } else if (waterTempF >= 85) {
-        return 10;      // 85-90
-    } else if (waterTempF >= 80) {
-        return 9;       // 80-85
-    } else if (waterTempF >= 75) {
-        return 8;       // 75-80
-    } else if (waterTempF >= 70) {
-        return 7;       // 70-75
-    } else {
-        return 6;
-    }
-}
-
 bool PoolPumpRS485::isPipeTempValid() const {
     if (msPumpStartTime == 0) {
         return false;       // pump is not running
@@ -661,14 +539,5 @@ bool PoolPumpRS485::isPipeTempValid() const {
 
 // called from yaml in a lambda, as desired to debug hours data
 void PoolPumpRS485::printDebugInfo() const {
-    auto pumpTargetHrs = esphome::id(pump_target_run_hours);
-    auto pumpActualHrs = esphome::id(pump_actual_run_hours);
-
-    for (int i=0; i<NDaysPumpHistory; i++) {
-        float actual = pumpActualHrs[i];
-        float target = pumpTargetHrs[i];
-        ESP_LOGD("custom",
-                 "----- PUMP HOURS (day %d) --- target: %0.2f, actual: %0.2f hours",
-                 i, target, actual);
-    }
+    ESP_LOGD("custom","printDebugInfo()");
 }
