@@ -6,19 +6,23 @@
 //
 
 #include "solar_controller.h"
+#include "../pool_pump_rs485/pool_pump_rs485.h"
 #include "esphome/core/preferences.h"
+#include "esphome/core/helpers.h"
+#include "esphome/components/time/real_time_clock.h"
 #include <string>
 
 static const char* const PREF_KEY = "solar_flow_state";
 static const char *const TAG = "solar_controller";
 
 SolarController* SolarController::getInstance() {
-    static SolarController instance;
-    return &instance;
+  return instance_;
 }
 
 // constructor
-SolarController::SolarController() : esphome::PollingComponent(SolarControllerPollIntervalSecs * 1000) {}
+SolarController::SolarController() : esphome::PollingComponent(SolarControllerPollIntervalSecs * 1000) {
+  instance_ = this;
+}
 
 void SolarController::setup() {
     // init times to now
@@ -27,7 +31,8 @@ void SolarController::setup() {
     msCurrentFlowStateChanged = now;
 
     // Create a preferences object
-    auto prefs = esphome::global_preferences->make_preference<uint32_t>(PREF_KEY);
+//    auto prefs = esphome::global_preferences->make_preference<uint32_t>(PREF_KEY);
+    auto prefs = esphome::global_preferences->make_preference<uint32_t>(sizeof(uint32_t), esphome::fnv1_hash(PREF_KEY));
     uint32_t saved_state;
 
     // Attempt to load the saved value from flash
@@ -53,9 +58,11 @@ void SolarController::setSolarFlowState(FlowStates newState) {
 
         if (newState == FlowStates::flowing || newState == FlowStates::idle) {
             // Create a preferences object and save the new state to flash
-            auto prefs = esphome::global_preferences->make_preference<uint32_t>(PREF_KEY);
+//            auto prefs = esphome::global_preferences->make_preference<uint32_t>(PREF_KEY);
+            auto prefs = esphome::global_preferences->make_preference<uint32_t>(sizeof(uint32_t), esphome::fnv1_hash(PREF_KEY));
             // Cast the enum to an integer for saving
-            prefs.save(static_cast<uint32_t>(flowOn));
+            const uint32_t saved_state = static_cast<uint32_t>(flowOn);
+            prefs.save(&saved_state);
         }
     }
 }
@@ -64,8 +71,8 @@ void SolarController::update() {
     // Check to see if the pump is running.  For now, we will not try to start
     // the pump here.  We only will enable solar heat if the pump is already
     // running and all the other conditions are met.
-    auto pumpRPMSensor = esphome::id(pump_rpm_sensor)
-    const float pumpRPM = pumpRPMSensor.has_state() ? pumpRPMSensor.state : NAN;
+    auto pumpRPMSensor = esphome::pool_pump_rs485::PoolPumpRS485::getInstance()->get_rpm_sensor();
+    const float pumpRPM = pumpRPMSensor->has_state() ? pumpRPMSensor->state : NAN;
     if (std::isnan(pumpRPM)) {
         // pump RPM not available, leave solar state unchanged
         return;
@@ -77,39 +84,45 @@ void SolarController::update() {
         return;
     }
 
+
+    // --- Time Check using localtime() with a safety check ---
+    // This is the Unix timestamp for January 1, 2021.
+    // We use it to check if the current time is a modern date.
+    const time_t MIN_VALID_TIME = 1609459200;
+    time_t now_ts = time(nullptr);
+
+    // This is the crucial safety check!
+    if (now_ts < MIN_VALID_TIME) {
+        // The clock is not synced yet. Exit and try again on the next update.
+        ESP_LOGD("custom", "Time not synced, skipping solar logic.");
+        return;
+    }
+
     // Time Check: we don't want to run the pump from 1600-2100 local,
     // because that's SDGE peak rates (exception: allow if in Spa mode)
     //
-    auto sntp = esphome::id(local_sntp_time);
-    const auto timeNow = sntp->now();
-    const int hour = timeNow.hour;
+    struct tm *timeinfo = localtime(&now_ts);
+    const int hour = timeinfo->tm_hour;
 
     if (!spa_mode_) {
         if (hour >= 16 && hour < 21) {
-            ESP_LOGD("custom","----- SOLAR: OFF (%02d:%02d is peak rates)",
-                     hour, timeNow.minute);
+            ESP_LOGD("custom","----- SOLAR: OFF (%02d hours is peak rates)", hour);
             setSolarFlowState(FlowStates::idle);
             return;
         }
     }
 
     // get temperatures we need to decide whether to enable or disable solar
-    auto waterTempC = esphome::id(estimated_water_temp);
-    auto panelTempC = esphome::id(panel_temperature);
-
-    float waterTempF = waterTempC.has_state() ? CtoF(waterTempC.state) : NAN;
-    float panelTempF = panelTempC.has_state() ? CtoF(panelTempC.state) : NAN;
+    float waterTempF = std::isnan(estimated_water_temp_) ? NAN : CtoF(estimated_water_temp_);
+    float panelTempF = std::isnan(panel_temperature_) ? NAN : CtoF(panel_temperature_);
     float targetHeatTempF = NAN;
     float targetCoolTempF = NAN;
 
     if (spa_mode_) {
-        auto spaTargetF = esphome::id(spa_target_temp);
-        targetHeatTempF = spaTargetF.has_state() ? spaTargetF.state : NAN;
+      targetHeatTempF = spa_target_temp_;
     } else {
-        auto poolHeatTargetF = esphome::id(pool_target_temp);
-        targetHeatTempF = poolHeatTargetF.has_state() ? poolHeatTargetF.state : NAN;
-        auto poolTargetCoolF = esphome::id(pool_cooling_target);
-        targetCoolTempF = poolTargetCoolF.has_state() ? poolTargetCoolF.state : NAN;
+        targetHeatTempF = pool_target_temp_;
+        targetCoolTempF = pool_cooling_target_;
     }
 
     // check for missing data
@@ -173,7 +186,9 @@ void SolarController::update() {
     }
 }
 
-FlowStates SolarController::evaluateCooling(float targetTempF, float waterTempF, float panelTempF) const {
+SolarController::FlowStates SolarController::evaluateCooling(float targetTempF,
+                                                             float waterTempF,
+                                                             float panelTempF) const {
     float targetWaterTempF = targetTempF;
     if (waterTempF <= targetWaterTempF) {
         ESP_LOGD("custom","----- SOLAR: NO COOLING NEED (water %0.1f <= target %0.1f)",
@@ -213,7 +228,9 @@ FlowStates SolarController::evaluateCooling(float targetTempF, float waterTempF,
     }
 }
 
-FlowStates SolarController::evaluateHeat(float targetTempF, float waterTempF, float panelTempF) const {
+SolarController::FlowStates SolarController::evaluateHeat(float targetTempF,
+                                                          float waterTempF,
+                                                          float panelTempF) const {
     // Check the water temperature.  If it is already above the target
     // temperature then we don't want solar heat on.
     float tolerance = spa_mode_ ? SPA_TARGET_TOLERANCE : POOL_TARGET_TOLERANCE;

@@ -4,6 +4,7 @@
 //
 //  Created by Gary Morris on 2025-09-28.
 //
+#pragma once
 
 using MilliSec = unsigned long;
 

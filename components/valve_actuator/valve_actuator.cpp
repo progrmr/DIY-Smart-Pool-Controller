@@ -1,22 +1,25 @@
 #include "valve_actuator.h"
 #include "esphome/core/preferences.h"
+#include "esphome/core/helpers.h"
 
 static const char *const TAG = "valve_position";
 static const char* const PREF_KEY = "valve_actuator_state";
 
 ValveActuator* ValveActuator::getInstance() {
-    static ValveActuator instance;
-    return &instance;
+    return instance_;
 }
 
 // constructor
-ValveActuator::ValveActuator() {}
+ValveActuator::ValveActuator() {
+  instance_ = this;
+}
 
 void ValveActuator::setup() {
     // Create a preferences object
-    auto prefs = global_preferences->make_preference<uint32_t>(PREF_KEY);
-
+//    auto prefs = global_preferences->make_preference<uint32_t>(PREF_KEY);
+    auto prefs = esphome::global_preferences->make_preference<uint32_t>(sizeof(uint32_t), esphome::fnv1_hash(PREF_KEY));
     uint32_t saved_state;
+
     // Attempt to load the saved value from flash
     if (prefs.load(&saved_state)) {
         // If successful, cast the integer back to your enum and set the state
@@ -38,7 +41,7 @@ void ValveActuator::setup() {
     }
 }
 
-const char *ValveActuator::valveStateText() const {
+const char* const ValveActuator::valveStateText() const {
     switch (valveState) {
         case ValveStates::valveClosed:  return "closed";
         case ValveStates::valveOpening: return "opening";
@@ -79,9 +82,11 @@ void ValveActuator::setValveState(ValveStates newState) {
         // (which wears out the flash drive too)
         if (newState == ValveStates::valveClosed || newState == ValveStates::valveOpened) {
             // Create a preferences object and save the new state to flash
-            auto prefs = global_preferences->make_preference<uint32_t>(PREF_KEY);
+//            auto prefs = global_preferences->make_preference<uint32_t>(PREF_KEY);
+            auto prefs = esphome::global_preferences->make_preference<uint32_t>(sizeof(uint32_t), esphome::fnv1_hash(PREF_KEY));
             // Cast the enum to an integer for saving
-            prefs.save(static_cast<uint32_t>(valveState));
+            const uint32_t saved_state = static_cast<uint32_t>(valveState);
+            prefs.save(&saved_state);
         }
     }
 }

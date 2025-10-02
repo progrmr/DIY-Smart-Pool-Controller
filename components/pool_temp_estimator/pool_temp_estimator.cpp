@@ -9,12 +9,13 @@
 #include "esphome/core/log.h"
 
 PoolTempEstimator* PoolTempEstimator::getInstance() {
-    static PoolTempEstimator instance;
-    return &instance;
+  return instance_;
 }
 
 // constructor
-PoolTempEstimator::PoolTempEstimator() : esphome::PollingComponent() {}
+PoolTempEstimator::PoolTempEstimator() : esphome::PollingComponent() {
+  instance_ = this;
+}
 
 void PoolTempEstimator::update() {
     if (std::isnan(lastWaterTempC) || std::isnan(panelTempC)) {

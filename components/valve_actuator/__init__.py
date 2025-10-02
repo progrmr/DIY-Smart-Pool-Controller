@@ -3,6 +3,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor, text_sensor
+from esphome.const import CONF_ID
 
 # Define these as custom keys instead of importing them
 CONF_PEAK_CURRENT = "peak_current"
@@ -17,6 +18,7 @@ CONF_VALVE_POSITION = "valve_position"
 # The schema now requires the IDs of sensors that have already been defined elsewhere.
 # This completely decouples the validation logic.
 CONFIG_SCHEMA = cv.Schema({
+    cv.GenerateID(): cv.declare_id(ValveActuator),
     cv.Required(CONF_PEAK_CURRENT): cv.use_id(sensor.Sensor),
     cv.Required(CONF_ACTUATION_TIME): cv.use_id(sensor.Sensor),
     cv.Required(CONF_VALVE_POSITION): cv.use_id(text_sensor.TextSensor),
@@ -24,9 +26,15 @@ CONFIG_SCHEMA = cv.Schema({
 
 async def to_code(config):
     """Generate the C++ code for this component."""
-    var = cg.add_global(ValveActuator.getInstance())
-    if var is None:
-        return
+    # var = cg.add_global(ValveActuator.getInstance())
+    # var = cg.add_global(cg.RawExpression(f"{ValveActuator}::getInstance()"))
+    # var = cg.RawExpression(f"{ValveActuator}::getInstance()")
+    # var = cg.add_global(ValveActuator.operator("ptr"), cg.RawExpression(f"{ValveActuator}::getInstance()"))
+    # if var is None:
+    #    return
+    
+    # Use the standard ESPHome way to create the object
+    var = cg.new_Pvariable(config[CONF_ID])
 
     await cg.register_component(var, config)
 

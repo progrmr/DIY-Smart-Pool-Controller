@@ -24,7 +24,7 @@ esphome:
           if (!std::isnan(pumpSpeedRequest)) {
             long speed = lroundf(pumpSpeedRequest);
             ESP_LOGD("custom","===== BOOT: restoring requestPumpSpeed RPM %ld", speed);
-            PoolPumpRS485::getInstance()->requestPumpSpeed(speed);
+            esphome::pool_pump_rs485::PoolPumpRS485::getInstance()->requestPumpSpeed(speed);
           }
       - delay: 15s
       - lambda: |-
@@ -144,7 +144,7 @@ number:
       - lambda: |-
           const long speed = lroundf(x);
           ESP_LOGD("custom","===== set new requestPumpSpeed RPM: %ld", speed);
-          PoolPumpRS485::getInstance()->requestPumpSpeed(speed);
+          esphome::pool_pump_rs485::PoolPumpRS485::getInstance()->requestPumpSpeed(speed);
 
 #----------------------------------------------------------------------
 # POOL HEAT TARGET TEMPERATURE
@@ -207,7 +207,7 @@ number:
     initial_value: 100
     on_value:
       then:
-        - lambda: 'PoolPumpRS485::getInstance()->printDebugInfo();'
+        - lambda: 'esphome::pool_pump_rs485::PoolPumpRS485::getInstance()->printDebugInfo();'
 
 #----------------------------------------------------------------------
 # SPA TIMER
@@ -280,11 +280,13 @@ number:
 # https://esphome.io/components/text_sensor/custom.html
 #----------------------------------------------------------------------
 valve_actuator:
+  id: valve_actuator_component
   peak_current: peak_current
   actuation_time: actuation_time
   valve_position: valve_position
 
 pool_temp_estimator:
+  id: pool_temp_estimator_component
   estimated_temperature_sensor: estimated_water_temp
 
 text_sensor:
@@ -311,6 +313,7 @@ text_sensor:
 # https://esphome.io/components/binary_sensor/custom.html
 #----------------------------------------------------------------------
 solar_controller:
+  id: solar_controller_component
   solar_flow_sensor: use_solar_heat
 
 binary_sensor:
@@ -323,7 +326,7 @@ binary_sensor:
       # bring pump to speed, wait a bit, then turn valve to solar
       - lambda: |-
           ESP_LOGD("custom","^^^^^^^^^^^^^^^ Solar Heat ON ^^^^^^^^^^^^^^^");
-          const long newPumpSpeed = PoolPumpRS485::getInstance()->pumpSpeedForSolar(true);
+          const long newPumpSpeed = esphome::pool_pump_rs485::PoolPumpRS485::getInstance()->pumpSpeedForSolar(true);
           id(pump_speed_request)->publish_state(newPumpSpeed);
       # delay while pump is priming (if off), to let it get up to speed
       - delay: 30s
@@ -340,7 +343,7 @@ binary_sensor:
       # set pump back to normal speed
       - lambda: |-
           ESP_LOGD("custom","vvvvvvvvvvvvvvv Solar Heat OFF vvvvvvvvvvvvvvv");
-          const long newPumpSpeed = PoolPumpRS485::getInstance()->pumpSpeedForSolar(false);
+          const long newPumpSpeed = esphome::pool_pump_rs485::PoolPumpRS485::getInstance()->pumpSpeedForSolar(false);
           id(pump_speed_request)->publish_state(newPumpSpeed);
 
 sensor:
@@ -351,6 +354,10 @@ sensor:
     accuracy_decimals: 1
     device_class: "temperature"
     state_class: "measurement"
+    on_value:
+      then:
+        - lambda: |-
+            SolarController::getInstance()->set_estimated_water_temp(x);
 
   # PEAK CURRENT - keeps track of the valve actuator's peak currant usage
   # measured in amps. This is for diagnostic purposes.  High peak current
@@ -485,7 +492,7 @@ sensor:
     accuracy_decimals: 1
     update_interval: never
     lambda: |-
-      auto pump = PoolPumpRS485::getInstance()
+      auto pump = esphome::pool_pump_rs485::PoolPumpRS485::getInstance();
       if (pump->isPipeTempValid()) {
         const float x = id(pipe_temperature).state;
         PoolTempEstimator::getInstance()->setWaterTempC(x);
@@ -755,13 +762,13 @@ switch:
         - lambda: |-
             const bool spaMode = true;
             SolarController::getInstance()->set_spa_mode(spaMode);
-            PoolPumpRS485::getInstance()->set_spa_mode(spaMode);
+            esphome::pool_pump_rs485::PoolPumpRS485::getInstance()->set_spa_mode(spaMode);
     on_turn_off:
       then:
         - lambda: |-
             const bool spaMode = false;
             SolarController::getInstance()->set_spa_mode(spaMode);
-            PoolPumpRS485::getInstance()->set_spa_mode(spaMode);
+            esphome::pool_pump_rs485::PoolPumpRS485::getInstance()->set_spa_mode(spaMode);
 
 #----------------------------------------------------------------------
 # TIME - used to reset min/max temp at midnight

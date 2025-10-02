@@ -16,6 +16,8 @@ class PoolTempEstimator : public esphome::PollingComponent {
 public:
     // singleton access
     static PoolTempEstimator* getInstance();
+    // Constructor
+    PoolTempEstimator();     // singleton constructor
 
     // --- PUBLIC GETTERS (Read-Only Access) ---
     // Anyone can call these methods to get the current sensor pointers.
@@ -32,12 +34,11 @@ public:
     void setWaterTempC(float newWaterTempC);
 
 private:
+    static inline PoolTempEstimator* instance_{nullptr};  // pointer to instance
+  
     // --- SENSOR MEMBERS ---
     // Public pointers to the sensor objects that we will manage.
     esphome::sensor::Sensor *estimatedTempSensor_{nullptr};
-
-    // Constructor
-    PoolTempEstimator();     // singleton constructor
 
     // State tracking variables
     float panelTempC = NAN;

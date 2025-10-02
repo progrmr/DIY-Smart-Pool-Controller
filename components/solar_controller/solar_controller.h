@@ -17,6 +17,8 @@ class SolarController : public esphome::PollingComponent {
 public:
     // singleton access
     static SolarController* getInstance();
+    // Constructor
+    SolarController();      // singleton constructor
 
     // --- PUBLIC GETTERS (Read-Only Access) ---
     // Anyone can call these methods to get the current sensor pointers.
@@ -32,15 +34,19 @@ public:
 
     // this component needs to know if the spa is in use to manage the solar
     void set_spa_mode(bool spa_mode) { spa_mode_ = spa_mode; }
+    void set_estimated_water_temp(float temp) { estimated_water_temp_ = temp; };
+    void set_panel_temperature(float temp) { panel_temperature_ = temp; };
+    void set_spa_target_temp(float temp) { spa_target_temp_ = temp; };
+    void set_pool_target_temp(float temp) { pool_target_temp_ = temp; };
+    void set_pool_cooling_target(float temp) { pool_cooling_target_ = temp; };
 
 private:
+    static inline SolarController* instance_{nullptr};  // pointer to instance
+
     // --- SENSOR MEMBERS ---
     // Public pointers to the sensor objects that we will manage.
     // solarFlowSensor indicates if water should be circulating up to the solar panels
     esphome::binary_sensor::BinarySensor* solarFlowSensor_{nullptr};
-
-    // Constructor
-    SolarController();      // singleton constructor
 
     // Type declarations
     enum class FlowStates { unknown, idle, flowing };
@@ -59,8 +65,13 @@ private:
     //
     MilliSec msMissingDataStarted{0};            // millis() time of first missing data event
 
-    // track current spa_mode switch
+    // track current values from other components
     bool spa_mode_{false};
+    float estimated_water_temp_{NAN};
+    float panel_temperature_{NAN};
+    float spa_target_temp_{NAN};
+    float pool_target_temp_{NAN};
+    float pool_cooling_target_{NAN};
 
     // constants
     //

@@ -144,6 +144,10 @@ public:
   // singleton access
   static PoolPumpRS485* getInstance();
 
+  // public constructor required for ESPHome, it will only be called once,
+  // and this is saved for getInstance() to use.
+  PoolPumpRS485(esphome::uart::UARTComponent *parent);       // singleton constructor
+
   void setup() override;
   void loop() override;
 
@@ -188,8 +192,6 @@ private:
   esphome::sensor::Sensor* powerSensor_{nullptr};          // pool pump % of max power
   esphome::sensor::Sensor* runTimeSensor_{nullptr};        // today's total pump run time, in hours
 
-  // Constructor
-  PoolPumpRS485(esphome::uart::UARTComponent *parent);       // singleton constructor
   static inline PoolPumpRS485* instance_{nullptr};  // pointer to instance
 
   // --- Private Members ---

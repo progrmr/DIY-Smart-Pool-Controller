@@ -24,6 +24,7 @@
 #include "esphome/core/component.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/components/text_sensor/text_sensor.h"
 #include "common_types.h"
 
 // This component manages the state and position of the valve.
@@ -31,6 +32,9 @@ class ValveActuator : public esphome::Component {
 public:
     // singleton access
     static ValveActuator* getInstance();
+    // Constructor
+    ValveActuator();                    // singleton constructor
+
 
     // --- PUBLIC GETTERS (Read-Only Access) ---
     // Anyone can call these methods to get the current sensor pointers.
@@ -53,14 +57,13 @@ public:
     void setCurrent(float amps);
 
 private:
+    static inline ValveActuator* instance_{nullptr};  // pointer to instance
+
     // --- PRIVATE MEMBER VARIABLES ---
     // These can now only be directly written to by methods within the ValveActuator class.
     esphome::sensor::Sensor *peakCurrentSensor_{nullptr};
     esphome::sensor::Sensor *actuationTimeSensor_{nullptr};
     esphome::text_sensor::TextSensor *valvePositionSensor_{nullptr};
-
-    // Constructor
-    ValveActuator();                    // singleton constructor
 
     // An enumeration to represent the possible states of the valve.
     enum class ValveStates {
@@ -72,7 +75,7 @@ private:
     };
 
     void setValveState(ValveStates newState);
-    const char *const valveStateText(ValveStates state) const;
+    const char *const valveStateText() const;
 
     // State variables
     bool valvePowerRelayOn = false;        // relay enables power to valve actuator

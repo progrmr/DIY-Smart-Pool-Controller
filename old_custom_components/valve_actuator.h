@@ -82,7 +82,7 @@ class ValvePosition : public PollingComponent, public TextSensor {
         }
     }
     
-    const char* const valveStateText(ValveStates state) {
+    const char* const valveStateText(ValveStates state) const {
         switch (state) {
             case valveClosed:  return "closed"; 
             case valveOpening: return "opening";
