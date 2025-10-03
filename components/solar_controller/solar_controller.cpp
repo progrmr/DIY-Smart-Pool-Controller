@@ -130,13 +130,13 @@ void SolarController::update() {
     std::string missingStr = "";
 
     if (std::isnan(waterTempF)) {
-        missingStr += " water temp";
+        missingStr += " waterTempF";
     }
     if (std::isnan(targetHeatTempF)) {
-        missingStr += " target heat temp";
+        missingStr += " targetHeatTempF";
     }
     if (std::isnan(panelTempF)) {
-        missingStr += " panel temp";
+        missingStr += " panelTempF";
     }
     if (missingStr.length() > 0) {
         if (msMissingDataStarted == 0) {
@@ -156,7 +156,9 @@ void SolarController::update() {
                      secElapsedMissing);
             // missing data for long time, disable solar
             setSolarFlowState(FlowStates::idle);
+            return;
         }
+        return;   // we have missing data
     }
 
     // evaluate whether we should enable solar heat or night cooling

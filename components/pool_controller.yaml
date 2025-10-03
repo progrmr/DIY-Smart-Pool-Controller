@@ -28,6 +28,30 @@ esphome:
           }
       - delay: 15s
       - lambda: |-
+          ESP_LOGD("custom", "===== BOOT: Restoring target temperatures to SolarController =====");
+          // For Pool Target Temperature
+          auto pool_target = id(pool_target_temp);
+          if (pool_target->has_state()) {
+            SolarController::getInstance()->set_pool_target_temp(pool_target->state);
+          }
+          // For Pool Cooling Target
+          auto pool_cooling = id(pool_cooling_target);
+          if (pool_cooling->has_state()) {
+            SolarController::getInstance()->set_pool_cooling_target(pool_cooling->state);
+          }
+          // For Spa Target Temperature
+          auto spa_target = id(spa_target_temp);
+          if (spa_target->has_state()) {
+            SolarController::getInstance()->set_spa_target_temp(spa_target->state);
+          }
+          // Restore spa_mode switch
+          auto spa_switch = id(spa_mode);
+          if (spa_switch->has_state()) {
+            const bool spaMode = true;
+            SolarController::getInstance()->set_spa_mode(spaMode);
+            esphome::pool_pump_rs485::PoolPumpRS485::getInstance()->set_spa_mode(spaMode);
+          }
+      - lambda: |-
           uint32_t notConnectedCount = 0;
           while (!WiFi.isConnected()) {
             delay(100);   // delay 100 ms
@@ -165,6 +189,10 @@ number:
     max_value: 99
     step: 1
     initial_value: 85
+    on_value:
+      then:
+        - lambda: |-
+            SolarController::getInstance()->set_pool_target_temp(x);
 
 #----------------------------------------------------------------------
 # POOL COOLING TARGET TEMPERATURE
@@ -185,6 +213,10 @@ number:
     max_value: 99
     step: 1
     initial_value: 88
+    on_value:
+      then:
+        - lambda: |-
+            SolarController::getInstance()->set_pool_cooling_target(x);
 
 #----------------------------------------------------------------------
 # SPA TARGET TEMPERATURE
@@ -207,67 +239,9 @@ number:
     initial_value: 100
     on_value:
       then:
-        - lambda: 'esphome::pool_pump_rs485::PoolPumpRS485::getInstance()->printDebugInfo();'
-
-#----------------------------------------------------------------------
-# SPA TIMER
-# This is the number of minutes remaining until the spa shuts off.
-# Set this to a number of minutes up to 4 hours (240 minutes) max.
-# This timer counts down and turns off spa mode when it reaches zero.
-#----------------------------------------------------------------------
-  - platform: template
-    name: "Spa Timer"
-    id: spa_timer
-    optimistic: True
-    unit_of_measurement: min
-    mode: slider
-    min_value: 0
-    max_value: 120
-    step: 1
-    initial_value: 0
-    on_value:
-      then:
         - lambda: |-
-            auto spaMode = id(spa_mode);
-            auto spaTimerEndSotd = id(spa_timer_end_sotd);
-
-            const bool spaIsRunning = spaMode->state;
-            //------------------------------------
-            // setting the timer to a new value
-            const long newTimerSetMin = lroundf(x);
-            const bool spaShouldRun = newTimerSetMin >= 1;
-            ESP_LOGD("custom","----- SET SPA TIMER: %ld min", newTimerSetMin);
-
-            // Update spaMode if needed
-            if (spaShouldRun != spaIsRunning) {
-                spaMode->publish_state( spaShouldRun );
-            }
-
-            if (newTimerSetMin <= 0) {
-              // timer was reset to 0, cancel the timer end time
-              id(spa_timer_end_sotd) = -1;    // invalid time
-              return;
-            }
-
-            //------------------------------------
-            // calculate timer end time
-            //
-            auto sntp = id(local_sntp_time);
-            const static long SOTD_MAX = 24 * 60 * 60;   // number of seconds per day
-            const ESPTime timeNow = sntp->now();
-            const long sotdNow = ((timeNow.hour * 60) + timeNow.minute) * 60 + timeNow.second;
-            long newSotdTimerEnd = sotdNow + newTimerSetMin * 60;
-            if (newSotdTimerEnd >= SOTD_MAX) {
-              newSotdTimerEnd -= SOTD_MAX;   // fix after midnight time
-            }
-
-            // minimize writes to EEPROM memory
-            if (spaTimerEndSotd != newSotdTimerEnd) {
-              ESP_LOGD("custom","----- SET SPA END TIME: %02ld:%02ld:%02ld (was %02ld:%02ld:%02ld)",
-                        newSotdTimerEnd/3600, (newSotdTimerEnd%3600)/60, newSotdTimerEnd%60,
-                        spaTimerEndSotd/3600, (spaTimerEndSotd%3600)/60, spaTimerEndSotd%60);
-              id(spa_timer_end_sotd) = newSotdTimerEnd;
-            }
+            esphome::pool_pump_rs485::PoolPumpRS485::getInstance()->printDebugInfo();
+            SolarController::getInstance()->set_spa_target_temp(x);
 
 #----------------------------------------------------------------------
 # VALVE ACTUATOR (SOLAR WATER CIRCULATION VALVE)
@@ -320,7 +294,6 @@ binary_sensor:
   - platform: template
     id: use_solar_heat
     name: "Use Solar Heat"
-
     # Actions are attached directly to it
     on_press:
       # bring pump to speed, wait a bit, then turn valve to solar
@@ -368,7 +341,10 @@ sensor:
   - platform: template
     name: "Peak Current"
     id: peak_current
-
+    accuracy_decimals: 2
+    device_class: "current"
+    state_class: "measurement"
+  
   # ACTUATION TIME - Measures how long it takes for the valve actuator to
   # complete its actuation from open to closed or closed to open.
   # This is for diagnostic purposes.  Taking less than ~25 seconds means
@@ -379,96 +355,9 @@ sensor:
   - platform: template
     name: "Actuation Time"
     id: actuation_time
-
-#----------------------------------------------------------------------
-# SPA TIME REMAINING -- count down display of the time remaining
-# on the spa timer.  When this gets to 0, the timer is reset to 0,
-# which shuts off the spa.
-#----------------------------------------------------------------------
-  - platform: template
-    name: "Spa Time Remaining"
-    id: spa_time_remaining
-    unit_of_measurement: "s"
-    accuracy_decimals: 0
-    update_interval: 15s
-    lambda: |-
-      long timerEndSotd = id(spa_timer_end_sotd);
-      if (timerEndSotd <= 0) {
-        return 0;             // no end time, timer is not running
-      }
-
-      // if timerEndSotd is tomorrow (early morning) and we are
-      // still today (late evening), adjust timerEndSotd
-      const static long SOTD_MAX = 24 * 60 * 60;   // number of seconds per day
-      const static long SOTD_NOON = SOTD_MAX / 2;
-      auto sntp = id(local_sntp_time);
-      const ESPTime timeNow = sntp->now();
-      const long sotdNow = ((timeNow.hour * 60) + timeNow.minute) * 60 + timeNow.second;
-
-      if (timerEndSotd < SOTD_NOON && sotdNow > SOTD_NOON) {
-        timerEndSotd += SOTD_MAX;     // make timer end after midnight
-      }
-      const long remainingSec = (timerEndSotd > sotdNow) ? timerEndSotd - sotdNow : 0;
-
-      // check to see if timer setting should be updated as timer runs down
-      // if the timer setting doesn't match the time remaining by more than
-      // 60 seconds, then update it.
-      auto timer = id(spa_timer);
-      const long curTimerSettingMin = lroundf(timer->state);
-      if (curTimerSettingMin <= 0) {
-        return 0;             // timer is finished
-      }
-      const long curTimerSettingSec = curTimerSettingMin * 60;
-      long diff = (curTimerSettingSec - remainingSec);
-      diff = (diff < 0) ? -diff : diff;   // absolute value
-      //if (diff >= 60) {
-      //  TBD;
-      //}
-
-
-
-      return remainingSec;
-      //
-      //auto timer = id(spa_timer);
-      //const long curTimerSettingMin = lroundf(timer->state);
-      //const bool isTimerRunning = (curTimerSettingMin > 0);
-      //
-      //static float oldTimerSettingMin = 0;
-      //static unsigned long msTimerStartTime = 0;
-      //
-      ////--------------------------------------
-      //// if the timer setting changed, reset the start time
-      ////
-      //const bool timerSettingChanged = abs(oldTimerSettingMin - curTimerSettingMin) > 0.1;
-      //if (timerSettingChanged) {
-      //    oldTimerSettingMin = curTimerSettingMin;
-      //    msTimerStartTime = millis();
-      //    return curTimerSettingMin;    // timer was reset
-      //}
-      //
-      ////--------------------------------------
-      //// calculate timer's time remaining
-      ////
-      //const MilliSec msElapsed = millis() - msTimerStartTime;
-      //const float elapsedSecF = msElapsed / 1000.0;
-      //const float timerSecF = curTimerSettingMin * 60.0;
-      //float timeLeftSecF = (timerSecF > elapsedSecF) ? timerSecF - elapsedSecF : 0;
-      //ESP_LOGD("custom","----- SPA TIMER (%0.0f min), time left: %0.1f sec", curTimerSettingMin, timeLeftSecF);
-      //return timeLeftSecF / 60.0;     // time remaining
-    on_value:
-      lambda: |-
-        //ESP_LOGD("custom","----- SPA TIMER, time left: %0.0f sec", x);
-        //# auto timer = id(spa_timer);
-        //const float curTimerSettingMin = timer->state;
-        ////--------------------------------------
-        //// if timer ran out, reset timer to 0
-        ////
-        //const bool timerActive = curTimerSettingMin >= 0.1;
-        //const bool timerEnding = (x <= 0.1);
-        //if (timerActive && timerEnding) {
-        //    ESP_LOGD("custom","----- SPA TIMER: timer ended");
-        //    timer->publish_state(0);       // reset the timer to 0
-        //}
+    accuracy_decimals: 1
+    device_class: "duration"
+    state_class: "measurement"
 
 #----------------------------------------------------------------------
 # WATER TEMPERATURE
@@ -589,7 +478,9 @@ sensor:
           send_every: 5
     on_value:
       then:
-        - lambda: 'PoolTempEstimator::getInstance()->setPanelTempC(x);'
+        - lambda: |-
+            PoolTempEstimator::getInstance()->setPanelTempC(x);
+            SolarController::getInstance()->set_panel_temperature(x);
 
 #----------------------------------------------------------------------
 # RESISTANCE SENSORS for thermistor's voltage dividors
@@ -754,7 +645,6 @@ switch:
   - platform: template
     name: "Spa Mode"
     id: spa_mode
-    # TODO: restore_mode should be RESTORE_AND_CALL
     restore_mode: RESTORE_DEFAULT_OFF
     optimistic: True
     on_turn_on:
@@ -772,6 +662,8 @@ switch:
 
 #----------------------------------------------------------------------
 # TIME - used to reset min/max temp at midnight
+# Note: SolarController relies on the SNTP being setup and sync'd,
+#       it uses localtime() and depends on it being valid.
 # https://esphome.io/components/time/index.html
 #----------------------------------------------------------------------
 time:
