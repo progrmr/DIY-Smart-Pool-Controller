@@ -330,7 +330,88 @@ sensor:
     on_value:
       then:
         - lambda: |-
+            ESP_LOGD("custom","xxxxx Estimated Water Temp: %5.2f", x);
             SolarController::getInstance()->set_estimated_water_temp(x);
+
+  - platform: template
+    name: "Water Temp Rate of Change"
+    id: water_temp_rate_of_change
+    icon: "mdi:chart-line-variant"
+    unit_of_measurement: "°F/hr"
+    accuracy_decimals: 2
+    state_class: "measurement"
+    # Update the interval to run the calculation every minute
+    update_interval: 1min
+    lambda: |-
+      static constexpr int n{20};
+      static constexpr int window{5};
+      static float recents[n];
+      static bool initialized{false};
+      if (!initialized) {
+        for (int i=0; i<n; i++) { recents[i] = NAN; }
+        initialized = true;
+      }
+      
+      // move old readings down by 1
+      for (int i=0; i<(n-1); i++) {
+        recents[i] = recents[i+1];
+      }
+      
+      // save current reading
+      recents[n-1] = id(estimated_water_temp).state;
+
+      // --- Loop through the array and append each value ---
+      char log_buffer[512];
+      log_buffer[0] = 0;
+      
+      for (int i = 0; i < n; i++) {
+        if (std::isnan(recents[i])) {
+          strcat(log_buffer, " nan");
+        } else {
+          char temp_buffer[16];
+          snprintf(temp_buffer, sizeof(temp_buffer), " %.2f", recents[i]);
+          strcat(log_buffer, temp_buffer);
+        }
+      }
+      // --- Finish the string and print it ---
+      ESP_LOGD("custom", "xxxxx Recents: %s", log_buffer);
+
+      // average the oldest readings to get a baseline reading
+      float baseline = 0;
+      int baseCount = 0;
+      for (int i=0; i<window; i++) {
+        if (!std::isnan(recents[i])) {
+          baseline += recents[i];
+          baseCount++;
+        }
+      }
+      if (baseCount == 0) {
+        return NAN;   // we don't have enough readings yet
+      }
+      baseline = baseline / baseCount;
+      ESP_LOGD("custom","xxxxx baseline temp: %5.2f", baseline);
+      
+      // average the newest readings to get a current reading
+      float current = 0;
+      int curCount = 0;
+      for (int i=n-window; i<n; i++) {
+        if (!std::isnan(recents[i])) {
+          current += recents[i];
+          curCount++;
+        }
+      }
+      if (curCount == 0) {
+        return NAN;   // we don't have enough readings yet
+      }
+      current = current / curCount;
+      ESP_LOGD("custom","xxxxx current temp: %5.2f", current);
+
+      // calculate the delta between the baseline and current
+      // note: assumes that readings are every minute
+      float delta = current - baseline;
+      float deltaPerHour = (delta / (n-window)) * 60.0f;
+      ESP_LOGD("custom","xxxxx delta per hour: %5.3f", deltaPerHour);
+      return deltaPerHour;
 
   # PEAK CURRENT - keeps track of the valve actuator's peak currant usage
   # measured in amps. This is for diagnostic purposes.  High peak current
@@ -383,18 +464,17 @@ sensor:
     lambda: |-
       auto pump = esphome::pool_pump_rs485::PoolPumpRS485::getInstance();
       if (pump->isPipeTempValid()) {
-        const float x = id(pipe_temperature).state;
-        PoolTempEstimator::getInstance()->setWaterTempC(x);
-        return x;
+        return id(pipe_temperature).state;
       } else {
         return NAN;
       }
     filters:
       - sliding_window_moving_average:
-          window_size: 5
+          window_size: 10
           send_every: 5
     on_value:
       lambda: |-
+        PoolTempEstimator::getInstance()->setWaterTempC(x);
         if (!std::isnan(x)) {
             auto minTemp = id(minimum_water_temperature);
             if (std::isnan(minTemp->state) || x < minTemp->state) {

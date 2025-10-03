@@ -87,10 +87,6 @@ float PoolTempEstimator::estimatedTempC(float lastTempC, MilliSec msLastTemp, fl
     return FtoC(newEstimateF);
 }
 
-void PoolTempEstimator::setPanelTempC(float newPanelTempC) {
-    panelTempC = newPanelTempC;
-}
-
 void PoolTempEstimator::setWaterTempC(float newWaterTempC) {
     if (!std::isnan(newWaterTempC)) {
         // use the sensor's water temperature

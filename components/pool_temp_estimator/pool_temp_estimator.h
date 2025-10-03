@@ -30,7 +30,10 @@ public:
     // Method declarations
     void update() override;
 
-    void setPanelTempC(float newPanelTempC);
+    // panel temp is the solar panel temperature, tells us if sunny (warming) or night (cooling)
+    void setPanelTempC(float newPanelTempC) { panelTempC = newPanelTempC; }
+
+    // water temp is the actual measure water temp, if we have this no need to estimate
     void setWaterTempC(float newWaterTempC);
 
 private:
